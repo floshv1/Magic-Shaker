@@ -129,6 +129,21 @@ Les contrôles doivent les détecter automatiquement. Ce sont aussi les exemples
 3. **Incohérence entre personas** : dans « Long trip… », Jacques est passager avant « une heure après la recharge », alors que dans « Lounge stop while charging » c'est Hugo, et Hugo est absent du use case trajet.
 4. **Besoins implicites** : des insights négatifs ne sont reliés à aucun user need, par exemple « Wants a clearer distance cue » (emotion -1, step « Obstacle close »).
 
+## CATIA Magic Community : contraintes constatées (2026-11-04)
+
+- L'éditeur textuel refuse plus de **20 000 caractères** par espace de noms racine ; le modèle est limité à
+  **500 éléments majeurs** ; le menu Fichier n'a pas « Import From » (on colle le texte dans l'éditeur, puis Alt+S).
+- Le modèle complet (`out/sysml/`, `out/model.sysml`) n'y entre donc pas : on y charge `out/catia/`, un fichier
+  autonome par use case (`generate/catia.py`, template `catia_use_case.sysml.j2`), testé sous la limite
+  (`tests/test_catia.py`). Toute réduction ajoutée va dans `TRIMS` et dans la matrice du fichier CATIA.
+- Syntaxe vérifiée dans CATIA : `@UserShakerRef { :>> id = "..."; }` (CATIA réécrit `id =` en `:>> id =`),
+  noms entre guillemets, unités `1.5 [m]`, gardes `if a and b`, `satisfy`, `dependency`, accents. Les
+  commentaires `//` sont supprimés à la synchronisation.
+- Vues : `DS_Views::SymbolicViews::gv` (générale), `::stv` (états), `::afv` (flux d'actions). Les éléments
+  exposés ne s'affichent qu'après « Display > Display Exposed Elements ». Les vues typées par la bibliothèque
+  OMG (`StandardViewDefinitions::GeneralView`) ne s'ouvrent pas en diagramme. Les noms de transition ne sont
+  pas affichés, les libellés `accept` le sont.
+
 ## Traçabilité (livrable clé)
 
 - `out/traceability.csv` : `usershaker_id, kind, sysml_qualified_name, status` (`mapped`, `partial`, `not_mapped` + raison).

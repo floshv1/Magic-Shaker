@@ -22,6 +22,7 @@ _LLM_DEFAULTS = {
     "ollama_host": "http://localhost:11434",
     "ollama_model": "qwen2.5:7b",
 }
+_CATIA_DEFAULTS = {"char_limit": 20000, "char_budget": 19000}
 _OMG_DEFAULTS = {
     "kernel_version": "",
     "kernel_url": "",
@@ -61,6 +62,12 @@ class GenerateSettings:
 
 
 @dataclass(frozen=True)
+class CatiaSettings:
+    char_limit: int     # l'éditeur textuel de CATIA Community refuse au-delà (par espace de noms racine)
+    char_budget: int    # cible du générateur : marge pour les vues ajoutées à la main dans CATIA
+
+
+@dataclass(frozen=True)
 class OmgSettings:
     kernel_version: str
     kernel_url: str
@@ -86,6 +93,7 @@ class Settings:
     generate: GenerateSettings = field(default_factory=lambda: GenerateSettings(**_GENERATE_DEFAULTS))
     omg: OmgSettings | None = None
     llm: LlmSettings = field(default_factory=lambda: LlmSettings(**_LLM_DEFAULTS))
+    catia: CatiaSettings = field(default_factory=lambda: CatiaSettings(**_CATIA_DEFAULTS))
 
 
 def load_settings(start: Path | None = None) -> Settings:
@@ -117,5 +125,6 @@ def load_settings(start: Path | None = None) -> Settings:
         ollama_host=os.environ.get("OLLAMA_HOST", llm_cfg["ollama_host"]),
         ollama_model=os.environ.get("P9_OLLAMA_MODEL", llm_cfg["ollama_model"]),
     )
+    catia = CatiaSettings(**{**_CATIA_DEFAULTS, **tool.get("catia", {})})
     return Settings(root=root, data_dir=resolve("data_dir"), out_dir=resolve("out_dir"), generate=gen, omg=omg,
-                    llm=llm)
+                    llm=llm, catia=catia)

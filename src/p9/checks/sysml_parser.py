@@ -230,14 +230,20 @@ def order_by_imports(texts: dict[str, str]) -> list[str]:
     return done
 
 
-def validate_files(paths: list[Path], timeout: int = 600) -> ValidationResult:
+def catia_prelude() -> Path:
+    """Remplaçant de la bibliothèque DS_Views de CATIA, à charger avant les fichiers out/catia/."""
+    return load_settings().root / "tools" / "sysml" / "DS_Views.sysml"
+
+
+def validate_files(paths: list[Path], timeout: int = 600, prelude: list[Path] | None = None) -> ValidationResult:
+    """`prelude` : fichiers chargés en premier, dans l'ordre donné (ex. remplaçant DS_Views)."""
     if not paths:
         return ValidationResult(returncode=2, stderr="aucun fichier")
     if not is_installed():
         raise ParserUnavailable("parseur OMG absent : lancer `make validate-setup`")
     p = setup(verbose=False)
     texts = {str(pth): pth.read_text(encoding="utf-8") for pth in paths}
-    ordered = order_by_imports(texts)
+    ordered = [str(pth) for pth in prelude or []] + order_by_imports(texts)
     cp = os.pathsep.join([str(p["jar"]), str(p["classes"])])
     proc = subprocess.run([str(p["java"]), "-cp", cp, JAVA_HELPER, str(p["library"]), *ordered],
                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
@@ -253,7 +259,7 @@ def validate_files(paths: list[Path], timeout: int = 600) -> ValidationResult:
     return res
 
 
-def validate_texts(files: dict[str, str], workdir: Path) -> ValidationResult:
+def validate_texts(files: dict[str, str], workdir: Path, prelude: list[Path] | None = None) -> ValidationResult:
     """Valide des contenus en mémoire (écrits dans workdir)."""
     workdir.mkdir(parents=True, exist_ok=True)
     paths = []
@@ -261,7 +267,7 @@ def validate_texts(files: dict[str, str], workdir: Path) -> ValidationResult:
         pth = workdir / name
         pth.write_bytes(text.encode("utf-8"))
         paths.append(pth)
-    return validate_files(paths)
+    return validate_files(paths, prelude=prelude)
 
 
 def main(argv: list[str]) -> int:
@@ -272,11 +278,14 @@ def main(argv: list[str]) -> int:
         setup()
         return 0
     groups: list[list[Path]] = []
+    catia_group: list[Path] = []
     if argv[0] == "validate-out":
         out = load_settings().out_dir
         groups = [sorted((out / "sysml").glob("*.sysml")), [out / "model.sysml"]]
         groups = [[p for p in g if p.is_file()] for g in groups]
-        if not any(groups):
+        # Fichiers CATIA autonomes : une session à part, après le remplaçant de DS_Views.
+        catia_group = sorted((out / "catia").glob("*.sysml"))
+        if not any(groups) and not catia_group:
             print(f"Aucun .sysml dans {out} : lancer `make generate` d'abord.")
             return 2
     else:
@@ -289,9 +298,10 @@ def main(argv: list[str]) -> int:
                 current.append(Path(a))
         groups.append(current)
     code = 0
-    for g in (g for g in groups if g):
+    sessions = [(g, None) for g in groups if g] + ([(catia_group, [catia_prelude()])] if catia_group else [])
+    for g, prelude in sessions:
         try:
-            res = validate_files(g)
+            res = validate_files(g, prelude=prelude)
         except ParserUnavailable as e:
             print(f"Erreur : {e}")
             return 2
