@@ -20,8 +20,11 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
 import urllib.request
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -235,21 +238,71 @@ def catia_prelude() -> Path:
     return load_settings().root / "tools" / "sysml" / "DS_Views.sysml"
 
 
-def validate_files(paths: list[Path], timeout: int = 600, prelude: list[Path] | None = None) -> ValidationResult:
-    """`prelude` : fichiers chargés en premier, dans l'ordre donné (ex. remplaçant DS_Views)."""
+LIBRARY_LABELS = {
+    "Kernel_Libraries": "bibliotheque standard OMG : noyau KerML",
+    "Systems_Library": "bibliotheque standard OMG : SysML",
+    "Domain_Libraries": "bibliotheque standard OMG : domaines (unites, quantites…)",
+}
+
+
+def validate_files(paths: list[Path], timeout: int = 600, prelude: list[Path] | None = None,
+                   on_event: Callable[[str, str], None] | None = None) -> ValidationResult:
+    """`prelude` : fichiers chargés en premier, dans l'ordre donné (ex. remplaçant DS_Views).
+
+    `on_event(kind, text)` : avancement lu en direct sur la sortie du parseur ("step" : bibliothèque ou
+    fichier en cours, "file" : résultat d'un fichier)."""
+    def emit(kind: str, text: str) -> None:
+        if on_event is not None:
+            on_event(kind, text)
+
     if not paths:
         return ValidationResult(returncode=2, stderr="aucun fichier")
     if not is_installed():
         raise ParserUnavailable("parseur OMG absent : lancer `make validate-setup`")
+    emit("step", "Demarrage de Java et du parseur OMG")
     p = setup(verbose=False)
     texts = {str(pth): pth.read_text(encoding="utf-8") for pth in paths}
     ordered = [str(pth) for pth in prelude or []] + order_by_imports(texts)
     cp = os.pathsep.join([str(p["jar"]), str(p["classes"])])
-    proc = subprocess.run([str(p["java"]), "-cp", cp, JAVA_HELPER, str(p["library"]), *ordered],
-                          capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    with tempfile.TemporaryFile() as err_file:
+        proc = subprocess.Popen([str(p["java"]), "-cp", cp, JAVA_HELPER, str(p["library"]), *ordered],
+                                stdout=subprocess.PIPE, stderr=err_file, text=True, encoding="utf-8",
+                                errors="replace")
+        timed_out = threading.Event()
+
+        def _kill() -> None:
+            timed_out.set()
+            proc.kill()
+
+        killer = threading.Timer(timeout, _kill)
+        killer.start()
+        out_lines: list[str] = []
+        try:
+            assert proc.stdout is not None
+            n_files = len(ordered)
+            done = 0
+            for line in proc.stdout:
+                line = line.rstrip("\r\n")
+                out_lines.append(line)
+                parts = line.split("|")
+                if parts[0] == "STAGE" and len(parts) >= 3:
+                    if parts[1] == "library":
+                        emit("step", f"Chargement de la {LIBRARY_LABELS.get(parts[2], parts[2])}")
+                    else:
+                        emit("step", f"Analyse de {parts[2]} ({done + 1}/{n_files})")
+                elif parts[0] == "FILE" and len(parts) == 4:
+                    done += 1
+                    emit("file", f"{parts[1]} : {parts[2]} erreur(s), {parts[3]} avertissement(s)")
+            proc.wait()
+        finally:
+            killer.cancel()
+        if timed_out.is_set():
+            raise subprocess.TimeoutExpired(JAVA_HELPER, timeout)
+        err_file.seek(0)
+        stderr = err_file.read().decode("utf-8", "replace")
     res = ValidationResult(returncode=proc.returncode,
-                           stderr="\n".join(line for line in proc.stderr.splitlines() if "log4j" not in line))
-    for line in proc.stdout.splitlines():
+                           stderr="\n".join(line for line in stderr.splitlines() if "log4j" not in line))
+    for line in out_lines:
         parts = line.split("|", 5)
         if parts[0] == "ISSUE" and len(parts) == 6:
             res.issues.append(SysmlIssue(file=parts[1], severity=parts[2], line=int(parts[3]),
@@ -259,7 +312,8 @@ def validate_files(paths: list[Path], timeout: int = 600, prelude: list[Path] | 
     return res
 
 
-def validate_texts(files: dict[str, str], workdir: Path, prelude: list[Path] | None = None) -> ValidationResult:
+def validate_texts(files: dict[str, str], workdir: Path, prelude: list[Path] | None = None,
+                   on_event: Callable[[str, str], None] | None = None) -> ValidationResult:
     """Valide des contenus en mémoire (écrits dans workdir)."""
     workdir.mkdir(parents=True, exist_ok=True)
     paths = []
@@ -267,7 +321,7 @@ def validate_texts(files: dict[str, str], workdir: Path, prelude: list[Path] | N
         pth = workdir / name
         pth.write_bytes(text.encode("utf-8"))
         paths.append(pth)
-    return validate_files(paths, prelude=prelude)
+    return validate_files(paths, prelude=prelude, on_event=on_event)
 
 
 def main(argv: list[str]) -> int:

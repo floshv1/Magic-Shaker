@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
@@ -146,12 +147,19 @@ def validate_proposals(raw_json: str, ex: Export, valid_ids: set[str]) -> Enrich
     return res
 
 
-def enrich(provider: Any, ctx: ToolContext) -> EnrichResult:
+def enrich(provider: Any, ctx: ToolContext, on_event: Callable[[str, str], None] | None = None) -> EnrichResult:
+    """`on_event(kind, text)` : suivi de l'avancement (voir providers)."""
+    def emit(text: str) -> None:
+        if on_event is not None:
+            on_event("step", text)
+
     items = build_payload(ctx)
     if not items:
         return EnrichResult(provider=getattr(provider, "name", ""))
     prompt = "Points a valider (JSON) :\n" + json.dumps(items, ensure_ascii=False, indent=1)
-    raw = provider.structured(SYSTEM_PROMPT, prompt, output_schema())
+    emit(f"Preparation de {len(items)} points a analyser (donnees minimales, {len(prompt)} caracteres envoyes)")
+    raw = provider.structured(SYSTEM_PROMPT, prompt, output_schema(), on_event=on_event)
+    emit("Verification des propositions recues (format, ids existants)")
     valid = set(ctx.graph.nodes) | {i for it in items for i in it.get("ids", [])}
     res = validate_proposals(raw, ctx.export, valid)
     res.payload_items = len(items)

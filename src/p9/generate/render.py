@@ -13,6 +13,7 @@ from p9.ingest import Export
 
 from .build import build_common, build_use_case, compute_common_names, use_case_package
 from .proposals import build_proposals
+from .review import build_review
 from .trace import TraceEntry
 
 TEMPLATES = Path(__file__).parent / "templates"
@@ -89,11 +90,13 @@ def _normalize(text: str) -> str:
 
 
 def generate(ex: Export, selected: list[str] | None = None, cfg: GenerateSettings | None = None,
-             accepted_proposals: list | None = None) -> Generated:
+             accepted_proposals: list | None = None, review_decisions: list | None = None) -> Generated:
     """Génère le fichier commun et un fichier par use case sélectionné (tous si None).
 
     `accepted_proposals` : propositions LLM acceptées par un humain, rendues dans un package
     séparé (hors du fichier unique model.sysml, pour ne pas mélanger avec le contenu d'origine).
+    `review_decisions` : décisions humaines sur les points à valider (p9.review), rendues elles aussi
+    dans un package séparé (origin = "human") quand elles ajoutent un élément de modèle.
     """
     cfg = cfg or load_settings().generate
     ucs = ex.use_cases_sorted()
@@ -123,6 +126,15 @@ def generate(ex: Export, selected: list[str] | None = None, cfg: GenerateSetting
         pkg, pctx, ptrace = build_proposals(cfg, accepted_proposals, out.trace, names.requirement)
         out.files[f"{pkg}.sysml"] = _normalize(env.get_template("llm_proposals.sysml.j2").render(**pctx))
         out.trace.extend(ptrace)
+    if review_decisions:
+        rpkg, rctx, rtrace = build_review(cfg, review_decisions, out.trace, names,
+                                          {c.component_id: c.name for c in ex.components},
+                                          {s.state_id: s.name for s in ex.component_states},
+                                          {f.feedback_id: f.step_id for f in ex.persona_step_feedback},
+                                          {s.step_id for s in ex.steps})
+        if rctx["items"]:
+            out.files[f"{rpkg}.sysml"] = _normalize(env.get_template("review.sysml.j2").render(**rctx))
+        out.trace.extend(rtrace)
     return out
 
 

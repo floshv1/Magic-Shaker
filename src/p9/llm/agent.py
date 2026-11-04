@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -51,9 +52,14 @@ def check_citations(text: str, ctx: ToolContext) -> tuple[list[str], list[str]]:
     return [i for i in found if i in known], [i for i in found if i not in known]
 
 
-def ask(provider: Any, ctx: ToolContext, question: str, history: list[dict[str, Any]] | None = None) -> AgentAnswer:
-    """Pose une question ; `history` = tours précédents [{role, content(str)}] (texte seulement)."""
-    res: ChatResult = provider.chat_with_tools(SYSTEM_PROMPT, question, history or [], ctx)
+def ask(provider: Any, ctx: ToolContext, question: str, history: list[dict[str, Any]] | None = None,
+        on_event: Callable[[str, str], None] | None = None) -> AgentAnswer:
+    """Pose une question ; `history` = tours précédents [{role, content(str)}] (texte seulement).
+
+    `on_event(kind, text)` : suivi de l'avancement (voir providers)."""
+    res: ChatResult = provider.chat_with_tools(SYSTEM_PROMPT, question, history or [], ctx, on_event=on_event)
+    if on_event is not None:
+        on_event("step", "Verification des ids cites dans la reponse")
     cited, unknown = check_citations(res.text, ctx)
     return AgentAnswer(
         text=res.text,

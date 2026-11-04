@@ -113,3 +113,9 @@ def test_outils_texte() -> None:
     assert "detect" in tokens("detected")
     assert refers_to("An hour after the charging stop, the car cruises.", {"lounge", "stop", "charg"})
     assert not refers_to("Before she takes the steer-by-wire wheel.", {"urban", "manoeuvre", "steer", "wire"})
+
+
+def test_chaque_controle_a_sa_regle_expliquee() -> None:
+    from p9.checks import ALL_CHECKS, CHECK_RULES
+    assert set(CHECK_RULES) == set(ALL_CHECKS)
+    assert all(CHECK_RULES[k] and all(r.strip() for r in CHECK_RULES[k]) for k in CHECK_RULES)

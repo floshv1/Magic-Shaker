@@ -11,15 +11,32 @@ from __future__ import annotations
 
 import hashlib
 import json
+import queue
+import threading
+import time
+from collections.abc import Callable
+from datetime import date
 from html import escape
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-from p9.checks import build_matrix, coverage, matrix_csv, run_all
+from p9.checks import CHECK_RULES, build_matrix, coverage, matrix_csv, run_all
 from p9.checks import sysml_parser
 from p9.config import load_settings
+from p9.progress import estimate, record
+from p9.review import (
+    ACTION_LABELS,
+    ACTIONS_BY_CHECK,
+    Decision,
+    ReviewStore,
+    decision_errors,
+    load_review,
+    review_csv,
+    review_state,
+    save_review,
+)
 from p9.generate import Diagram, build_diagrams, generate, generate_catia, make_zip
 from p9.ingest import REQUIRED_SHEETS, Export, ExportUnreadable, load_dir, load_zip, use_case_summaries
 from p9.llm import (
@@ -117,6 +134,13 @@ h1,h2,h3{letter-spacing:-0.01em}
 .p9-legend i{display:inline-block;width:10px;height:10px;margin-right:6px;vertical-align:0}
 
 /* points à valider, propositions */
+.p9-rules{font-style:italic;color:var(--ink-soft);font-size:13px;line-height:1.45;margin:2px 0 8px;
+  padding:6px 0 6px 12px;border-left:2px solid var(--line)}
+.p9-rules span{font-weight:500}
+.p9-rules ol{margin:2px 0 0;padding-left:18px}
+.p9-rules li{margin:1px 0}
+.p9-decision{font-size:13.5px;color:var(--ink);background:#F7F9FB;border-left:3px solid var(--ok);
+  padding:6px 10px;margin:6px 0}
 .p9-finding{padding:8px 0;border-bottom:1px solid var(--line);font-size:14.5px}
 .p9-finding:last-child{border-bottom:none}
 .ids{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink-soft);word-break:break-all}
@@ -147,11 +171,13 @@ def cached_findings(key: str, _ex: Export) -> dict:
 
 
 @st.cache_data(show_spinner="Traduction en SysML v2…")
-def cached_generate(key: str, _ex: Export, selected: tuple[str, ...], accepted_json: str):
+def cached_generate(key: str, _ex: Export, selected: tuple[str, ...], accepted_json: str, review_json: str):
     store = ProposalStore.model_validate_json(accepted_json)
-    gen = generate(_ex, list(selected), SETTINGS.generate, accepted_proposals=store.proposals)
+    decisions = ReviewStore.model_validate_json(review_json).decisions
+    gen = generate(_ex, list(selected), SETTINGS.generate, accepted_proposals=store.proposals,
+                   review_decisions=decisions)
     findings = run_all(_ex)
-    matrix = build_matrix(_ex, gen, findings["constraints_in_text_only"])
+    matrix = build_matrix(_ex, gen, findings["constraints_in_text_only"], decisions)
     return gen, matrix, coverage(_ex, gen, matrix), matrix_csv(matrix)
 
 
@@ -213,6 +239,75 @@ def diagram_viewer(d: Diagram, height: int = 620) -> None:
     doc = (page.replace("__VIZ_JS__", viz.replace("</script", "<\\/script"))
                .replace("__DOT_JSON__", as_js(d.dot)).replace("__TITLE_JSON__", as_js(d.title)))
     st.iframe(doc, height=height)
+
+
+TIMINGS = SETTINGS.out_dir / "timings.json"
+DEFAULT_SECONDS = {"omg": 60.0, "enrich": 60.0, "chat": 30.0}
+
+
+def llm_key(op: str) -> str:
+    llm = SETTINGS.llm
+    model = llm.anthropic_model if llm.provider == "anthropic" else llm.ollama_model
+    return f"{op}:{llm.provider}:{model}"
+
+
+def run_live(title: str, timing_key: str, work: Callable[[Callable[[str, str], None]], object]):
+    """Lance `work(on_event)` dans un fil séparé et affiche en direct : étapes, outils, tokens, temps écoulé
+    et estimation (médiane des exécutions précédentes, sinon valeur indicative). Relance l'exception éventuelle."""
+    events: queue.Queue[tuple[str, str]] = queue.Queue()
+    box: dict[str, object] = {}
+
+    def target() -> None:
+        try:
+            box["result"] = work(lambda kind, text: events.put((kind, text)))
+        except BaseException as e:  # noqa: BLE001 (relancée dans le fil principal)
+            box["error"] = e
+
+    measured = estimate(TIMINGS, timing_key)
+    est = measured or DEFAULT_SECONDS.get(timing_key.split(":", 1)[0], 30.0)
+    basis = "d'après les exécutions précédentes" if measured else "estimation indicative, affinée après ce premier essai"
+    worker = threading.Thread(target=target, daemon=True)
+    t0 = time.monotonic()
+    worker.start()
+    log: list[str] = []
+    live = ""
+    with st.status(title, expanded=True) as status:
+        bar = st.progress(0.0)
+        lines = st.empty()
+        while True:
+            while not events.empty():
+                kind, text = events.get()
+                if kind == "tokens":
+                    live = text
+                else:
+                    log.append(text)
+                    live = ""
+            elapsed = time.monotonic() - t0
+            if elapsed <= est:
+                bar.progress(min(elapsed / est, 0.97),
+                             text=f"{elapsed:.0f} s écoulées sur environ {est:.0f} s ({basis})")
+            else:
+                bar.progress(0.97, text=f"{elapsed:.0f} s écoulées : plus long que prévu (environ {est:.0f} s), "
+                                        "toujours en cours")
+            shown = [f"- {escape(t)}" for t in log[-10:]]
+            if live:
+                shown.append(f"- *{escape(live)}*")
+            lines.markdown("\n".join(shown) or "- Démarrage…")
+            if not worker.is_alive() and events.empty():
+                break
+            worker.join(0.4)
+        elapsed = time.monotonic() - t0
+        if "error" in box:
+            status.update(label=f"{title} : échec après {elapsed:.0f} s", state="error", expanded=True)
+            raise box["error"]  # type: ignore[misc]
+        record(TIMINGS, timing_key, elapsed)
+        bar.progress(1.0, text=f"Terminé en {elapsed:.0f} s")
+        status.update(label=f"{title} : terminé en {elapsed:.0f} s", state="complete", expanded=False)
+    return box.get("result")
+
+
+def review_json_pretty(store: ReviewStore) -> str:
+    return json.dumps(store.model_dump(mode="json"), ensure_ascii=False, indent=2) + "\n"
 
 
 def stepper(current: int, notes: list[str]) -> None:
@@ -420,8 +515,15 @@ if step == 2:
 
 
 # ============================================================ 3. résultats
-def _findings_block(title: str, items, empty: str) -> None:
+def _findings_block(title: str, check: str, empty: str, why: str = "") -> None:
+    items = findings[check]
     st.markdown(f"**{title}** ({len(items)})")
+    if why:
+        st.caption(why)
+    rules = CHECK_RULES.get(check, [])
+    if rules:
+        html("<div class='p9-rules'><span>Règle appliquée</span><ol>"
+             + "".join(f"<li>{escape(r)}</li>" for r in rules) + "</ol></div>")
     if not items:
         st.caption(empty)
     for f in items:
@@ -454,14 +556,216 @@ def _ledger(matrix) -> None:
          f"<span><i style='background:var(--loss)'></i><b>{lost}</b>non traduits</span></div></div>")
 
 
+REVIEW_SECTIONS = [
+    ("constraints_in_text_only", "Contraintes présentes seulement dans le texte libre",
+     "Une phrase du déclencheur (trigger_text) n'a aucune condition structurée équivalente dans step_triggers. "
+     "Elle reste en commentaire dans le .sysml mais ne devient pas une garde : ajoutez la garde, ou écartez "
+     "le point si la condition existe déjà.",
+     "Aucune : chaque phrase de trigger_text a une condition structurée."),
+    ("persona_inconsistencies", "Incohérences entre personas",
+     "Les textes d'un use case contredisent les personas : rôle d'occupant attribué à un autre persona dans sa "
+     "biographie, persona cité mais absent du use case, renvoi à un autre use case avec d'autres personas. "
+     "La source est à corriger dans UserShaker ; le modèle ne la réécrit pas.",
+     "Aucune détectée."),
+    ("implicit_needs", "Insights négatifs non reliés à un user need",
+     "Un ressenti négatif (emotion_score < 0) d'un persona sur un step. Le format UserShaker ne le relie à aucun "
+     "user need : créez le requirement correspondant, rattachez-le à un besoin existant, ou écartez-le.",
+     "Aucun."),
+]
+STATUS_BADGE = {
+    None: ("À traiter", "#8a5a00", "#FCEFD2"),
+    "guard": ("Garde ajoutée", "#1f5c3a", "#DCEFE3"),
+    "requirement": ("Requirement créé", "#1f5c3a", "#DCEFE3"),
+    "link_need": ("Rattaché à un user need", "#1f5c3a", "#DCEFE3"),
+    "fix_at_source": ("À corriger dans UserShaker", "#1d3f8f", "#DFE7F7"),
+    "dismiss": ("Écarté", "#4b5568", "#E6E9EE"),
+}
+
+
+def _status_badge(action: str | None) -> str:
+    label, fg, bg = STATUS_BADGE[action]
+    return f"<span class='badge' style='color:{fg};background:{bg};font-weight:500'>{escape(label)}</span>"
+
+
+def _save_decision(d: Decision) -> None:
+    rs = load_review(SETTINGS.review_file)
+    rs.upsert(d)
+    save_review(rs, SETTINGS.review_file)
+
+
+def _undo_decision(fid: str) -> None:
+    rs = load_review(SETTINGS.review_file)
+    rs.remove(fid)
+    save_review(rs, SETTINGS.review_file)
+    st.session_state.pop(f"rv_edit_{fid}", None)
+
+
+def _edit_decision(fid: str) -> None:
+    st.session_state[f"rv_edit_{fid}"] = True
+
+
+def _use_proposal(fid: str, p, action: str) -> None:
+    """Pré-remplit le formulaire avec une proposition du LLM : l'humain la relit, la modifie, puis enregistre."""
+    st.session_state[f"rv_act_{fid}"] = ACTION_LABELS[action]
+    st.session_state[f"rv_title_{fid}"] = p.title
+    st.session_state[f"rv_text_{fid}"] = p.text
+    st.session_state[f"rv_mode_{fid}"] = GUARD_MODES[1]
+    st.session_state[f"rv_llm_{fid}"] = p.proposal_id
+    st.session_state[f"rv_edit_{fid}"] = True
+
+
+GUARD_MODES = ["Condition structurée : un composant dans un état", "Condition décrite en texte"]
+
+
+def _review_form(item) -> None:
+    f, fid = item.finding, item.finding_id
+    d = item.decision
+    actions = ACTIONS_BY_CHECK[f.check]
+    labels = [ACTION_LABELS[a] for a in actions]
+    comps = sorted(ex.components, key=lambda c: (c.name.lower(), c.component_id))
+    comp_ids = [c.component_id for c in comps]
+    comp_name = {c.component_id: c.name for c in comps}
+    needs = sorted(ex.user_needs, key=lambda u: (u.name.lower(), u.user_need_id))
+    need_ids = [u.user_need_id for u in needs]
+    sentence = f.detail.get("sentence", "")
+    insight = f.detail.get("insight", "")
+    # valeurs de départ : la décision existante, sinon un pré-remplissage tiré du point
+    st.session_state.setdefault(f"rv_act_{fid}", ACTION_LABELS[d.action] if d else labels[0])
+    st.session_state.setdefault(f"rv_title_{fid}", d.title if d and d.title else (sentence or insight)[:80])
+    st.session_state.setdefault(f"rv_text_{fid}", d.text if d and d.text else (
+        sentence if f.check == "constraints_in_text_only"
+        else f"Le véhicule doit répondre au besoin exprimé : « {insight} »." if insight else ""))
+    st.session_state.setdefault(f"rv_reason_{fid}", d.reason if d else "")
+    if d is not None:
+        default_mode = GUARD_MODES[0] if d.state_id else GUARD_MODES[1]
+    else:   # une phrase avec un chiffre (« below 10 km/h ») vise souvent une grandeur absente des composants
+        default_mode = GUARD_MODES[1] if any(ch.isdigit() for ch in sentence) else GUARD_MODES[0]
+    st.session_state.setdefault(f"rv_mode_{fid}", default_mode)
+    if d and d.component_id in comp_ids:
+        st.session_state.setdefault(f"rv_comp_{fid}", d.component_id)
+    closest = f.detail.get("closest_need_id", "")
+    default_need = d.need_id if d and d.need_id in need_ids else closest if closest in need_ids else need_ids[0]
+    st.session_state.setdefault(f"rv_need_{fid}", default_need)
+
+    choice = st.radio("Décision", labels, key=f"rv_act_{fid}", horizontal=True)
+    action = actions[labels.index(choice)]
+    fields: dict = {}
+    if action == "guard":
+        fields["title"] = st.text_input("Nom de la garde", key=f"rv_title_{fid}")
+        mode = st.radio("Type de condition", GUARD_MODES, key=f"rv_mode_{fid}", horizontal=True)
+        if mode == GUARD_MODES[0]:
+            c1, c2 = st.columns(2)
+            cid = c1.selectbox("Composant", comp_ids, key=f"rv_comp_{fid}", format_func=lambda c: comp_name[c])
+            states = sorted((s for s in ex.component_states if s.component_id == cid), key=lambda s: s.position)
+            state_ids = [s.state_id for s in states]
+            if d and d.state_id in state_ids:
+                st.session_state.setdefault(f"rv_state_{fid}", d.state_id)
+            if st.session_state.get(f"rv_state_{fid}") not in state_ids:
+                st.session_state.pop(f"rv_state_{fid}", None)
+            sname = {s.state_id: s.name for s in states}
+            sid = c2.selectbox("État attendu", state_ids, key=f"rv_state_{fid}",
+                               format_func=lambda x: sname.get(x, x)) if state_ids else ""
+            fields.update(component_id=cid, state_id=sid or "")
+            if not state_ids:
+                st.caption("Ce composant n'a aucun état : choisissez-en un autre ou décrivez la condition en texte.")
+        else:
+            fields["text"] = st.text_area("Condition", key=f"rv_text_{fid}", height=70,
+                                          help="Ex. : vitesse du véhicule < 10 km/h")
+            st.caption("Aucun composant de l'export ne représente cette grandeur : la garde est créée avec cette "
+                       "description. Pensez à ajouter le composant dans UserShaker pour qu'elle devienne structurée.")
+        fields["reason"] = st.text_input("Motif (facultatif)", key=f"rv_reason_{fid}")
+    elif action == "requirement":
+        fields["title"] = st.text_input("Titre du requirement", key=f"rv_title_{fid}")
+        fields["text"] = st.text_area("Texte (une phrase vérifiable : « Le véhicule doit… »)",
+                                      key=f"rv_text_{fid}", height=80)
+        fields["reason"] = st.text_input("Motif (facultatif)", key=f"rv_reason_{fid}")
+    elif action == "link_need":
+        nname = {u.user_need_id: u.name for u in needs}
+        fields["need_id"] = st.selectbox("User need existant", need_ids, key=f"rv_need_{fid}",
+                                         format_func=lambda x: nname.get(x, x))
+        if closest:
+            st.caption(f"Pré-sélection : le besoin le plus proche par les mots ({nname.get(closest, closest)}).")
+        fields["reason"] = st.text_input("Motif (facultatif)", key=f"rv_reason_{fid}")
+    else:
+        fields["reason"] = st.text_area(
+            "Ce qu'il faut corriger dans UserShaker" if action == "fix_at_source" else "Pourquoi écarter ce point ?",
+            key=f"rv_reason_{fid}", height=70)
+
+    err = st.session_state.pop(f"rv_err_{fid}", None)
+    if err:
+        st.error(err)
+    st.button("Enregistrer la décision", key=f"rv_save_{fid}", type="primary", on_click=_submit_decision,
+              args=(f, fid, action, fields))
+
+
+def _submit_decision(f, fid: str, action: str, fields: dict) -> None:
+    """Callback : exécuté avant le réaffichage, la page montre donc tout de suite la décision enregistrée."""
+    author = (st.session_state.get("rv_author") or "").strip()
+    # relit les champs dans l'état des widgets (valeurs au moment du clic)
+    values = {}
+    for k, v in fields.items():
+        wkey = {"title": "rv_title_", "text": "rv_text_", "reason": "rv_reason_", "component_id": "rv_comp_",
+                "state_id": "rv_state_", "need_id": "rv_need_"}[k] + fid
+        cur = st.session_state.get(wkey, v)
+        values[k] = (cur or "").strip() if isinstance(cur, str) or cur is None else cur
+    dec = Decision(
+        finding_id=fid, check=f.check, action=action, author=author or "?", decided_at=date.today().isoformat(),
+        target_ids=list(f.ids), finding_message=f.message,
+        llm_proposal_id=st.session_state.get(f"rv_llm_{fid}", "") if action in {"guard", "requirement"} else "",
+        **values,
+    )
+    errors = ([] if author else ["indiquez votre nom en haut de l'onglet"]) + decision_errors(dec, ex)
+    if errors:
+        st.session_state[f"rv_err_{fid}"] = "Décision non enregistrée : " + " ; ".join(errors) + "."
+        return
+    _save_decision(dec)
+    st.session_state.pop(f"rv_edit_{fid}", None)
+
+
+def _review_card(item) -> None:
+    f, fid, d = item.finding, item.finding_id, item.decision
+    with st.container(border=True, key=f"rvcard_{fid}"):
+        html(f"{_status_badge(d.action if d else None)} {escape(f.message)}<br>"
+             f"<span class='ids'>{' · '.join(f.ids)}</span>")
+        if d:
+            detail = {"guard": d.title, "requirement": d.title, "link_need": next(
+                (u.name for u in ex.user_needs if u.user_need_id == d.need_id), d.need_id)}.get(d.action, d.reason)
+            src = " (à partir d'une proposition du LLM)" if d.llm_proposal_id else ""
+            html(f"<div class='p9-decision'><b>{escape(ACTION_LABELS[d.action])}</b> par {escape(d.author)} "
+                 f"le {escape(d.decided_at)}{src} : {escape(detail)}</div>")
+        editing = d is None or st.session_state.get(f"rv_edit_{fid}", False)
+        if d is not None:
+            b1, b2, _ = st.columns([1, 1, 3])
+            b1.button("Modifier", key=f"rv_mod_{fid}", on_click=_edit_decision, args=(fid,), width="stretch",
+                      disabled=editing)
+            b2.button("Annuler la décision", key=f"rv_undo_{fid}", on_click=_undo_decision, args=(fid,),
+                      width="stretch")
+        if editing:
+            related = [p for p in store.proposals if p.status != "rejected" and set(p.target_ids) & set(f.ids)
+                       and p.kind in {"guard", "requirement"}
+                       and p.kind in ACTIONS_BY_CHECK[f.check]]
+            with st.expander("Traiter ce point", expanded=d is not None):
+                for p in related:
+                    q1, q2 = st.columns([4, 1.3], vertical_alignment="center")
+                    q1.markdown(f"<span class='muted'>Proposition du LLM ({escape(p.kind)}) : <b>{escape(p.title)}</b>"
+                                f" : {escape(p.text)}</span>", unsafe_allow_html=True)
+                    q2.button("Reprendre et modifier", key=f"rv_use_{fid}_{p.proposal_id}", on_click=_use_proposal,
+                              args=(fid, p, p.kind), width="stretch")
+                _review_form(item)
+
+
 if step == 3:
     store = load_store(PROPOSALS_PATH)
     accepted = ProposalStore(proposals=store.accepted())
+    review = load_review(SETTINGS.review_file)
+    review_json = review.model_dump_json()
     gen, matrix, cov, trace_csv = cached_generate(
-        f"{export_key}|{'|'.join(translated)}", ex, translated, accepted.model_dump_json())
+        f"{export_key}|{'|'.join(translated)}|{hashlib.sha256(review_json.encode()).hexdigest()}", ex, translated,
+        accepted.model_dump_json(), review_json)
     catia_files = cached_catia(f"{export_key}|{'|'.join(translated)}", ex, translated)
     findings = cached_findings(export_key, ex)
-    n_review = sum(len(findings[k]) for k in ("constraints_in_text_only", "persona_inconsistencies", "implicit_needs"))
+    rv_state = review_state(findings, review)
+    n_open = rv_state.total - rv_state.done
 
     head = st.columns([3, 1.3, 1.6], vertical_alignment="bottom")
     with head[0]:
@@ -472,6 +776,9 @@ if step == 3:
     head[1].button("Modifier la sélection", on_click=go, args=(2,), width="stretch")
     bundle = dict(gen.files)
     bundle["traceability.csv"] = trace_csv
+    if review.decisions:
+        bundle["review/decisions.json"] = review_json_pretty(review)
+        bundle["review/review.csv"] = review_csv(review)
     bundle.update({f"catia/{f.name}": f.text for f in catia_files})
     head[2].download_button("Télécharger le modèle (.zip)", make_zip(bundle), file_name="sysml_export.zip",
                             mime="application/zip", type="primary", width="stretch",
@@ -481,7 +788,10 @@ if step == 3:
         st.info("La sélection a changé depuis cette traduction. Revenez à l'étape Choisir pour traduire à nouveau.")
     _ledger(matrix)
 
-    labels = RESULT_TABS[:2] + [f"Points à valider ({n_review})", RESULT_TABS[3]]
+    # libellés fixes : un libellé qui change (compteur) ferait perdre l'onglet ouvert à Streamlit
+    labels = RESULT_TABS
+    if n_open:
+        st.caption(f"{plural(n_open, 'point')} à valider sur {rv_state.total} : onglet « Points à valider ».")
     t_diag, t_files, t_review, t_chat = st.tabs(labels, key="result_tab", on_change="rerun")
 
     # ---------------------------------------------------------------- diagrammes
@@ -555,77 +865,101 @@ if step == 3:
             with st.expander("Vérifier la syntaxe avec le parseur OMG SysML v2"):
                 if not sysml_parser.is_installed():
                     st.caption("Parseur OMG non installé : lancez `make validate-setup` une fois.")
-                elif st.button("Lancer la vérification (environ 1 min)"):
-                    with st.spinner("Vérification en cours…"):
-                        try:
-                            res = sysml_parser.validate_texts(gen.files, SETTINGS.out_dir / "ui-validate")
-                        except Exception as e:
-                            st.error(f"Vérification impossible : {e}")
+                elif st.button("Lancer la vérification"):
+                    try:
+                        res = run_live("Vérification par le parseur OMG SysML v2", "omg",
+                                       lambda ev: sysml_parser.validate_texts(
+                                           gen.files, SETTINGS.out_dir / "ui-validate", on_event=ev))
+                    except Exception as e:
+                        st.error(f"Vérification impossible : {e}")
+                    else:
+                        if res.ok:
+                            st.success(f"Les {len(res.files)} fichiers passent le parseur OMG, sans erreur.")
                         else:
-                            if res.ok:
-                                st.success(f"Les {len(res.files)} fichiers passent le parseur OMG, sans erreur.")
-                            else:
-                                st.error(f"{sum(f.errors for f in res.files)} erreur(s) OMG")
-                                st.dataframe(pd.DataFrame([i.model_dump() for i in res.issues]), hide_index=True,
-                                             width="stretch")
+                            st.error(f"{sum(f.errors for f in res.files)} erreur(s) OMG")
+                            st.dataframe(pd.DataFrame([i.model_dump() for i in res.issues]), hide_index=True,
+                                         width="stretch")
 
     # ---------------------------------------------------------------- points à valider (+ propositions LLM)
     if t_review.open:
         with t_review:
-            left, right = st.columns(2, gap="large")
-            with left:
-                st.markdown("##### Détectés automatiquement")
-                _findings_block("Contraintes présentes seulement dans le texte libre",
-                                findings["constraints_in_text_only"],
-                                "Aucune : chaque phrase de trigger_text a une condition structurée.")
-                _findings_block("Incohérences entre personas", findings["persona_inconsistencies"], "Aucune détectée.")
-                _findings_block("Insights négatifs non reliés à un user need", findings["implicit_needs"], "Aucun.")
-                with st.expander("Autres contrôles"):
-                    _findings_block("User needs non couverts", findings["uncovered_needs"],
-                                    "Tous les user needs sont servis.")
-                    _findings_block("États jamais atteints", findings["unreachable_states"],
-                                    "Tous les états sont atteints.")
-                    _findings_block("Triggers invalides", findings["invalid_triggers"], "Aucun.")
+            st.caption("Règles Python fixes appliquées à l'export, sans LLM : le résultat est le même à chaque "
+                       "lancement. Elles repèrent ce que le modèle SysML ne peut pas représenter tel quel. "
+                       "Pour chaque point, c'est vous qui décidez : ajouter la garde ou le requirement qui manque, "
+                       "rattacher à un besoin existant, renvoyer la correction à UserShaker, ou écarter le point. "
+                       "Les décisions sont signées, enregistrées dans review/decisions.json et générées dans un "
+                       "package séparé (origin = \"human\").")
+            top = st.columns([1.4, 2.6], vertical_alignment="bottom")
+            top[0].text_input("Votre nom (enregistré avec chaque décision)", key=persist("rv_author", ""),
+                              on_change=remember, args=("rv_author",), placeholder="Prénom Nom")
+            with top[1]:
+                st.progress(rv_state.done / rv_state.total if rv_state.total else 1.0,
+                            text=f"{rv_state.done} / {rv_state.total} points traités")
+            for check, title, why, empty in REVIEW_SECTIONS:
+                rows = rv_state.items.get(check, [])
+                st.markdown(f"##### {title} ({len(rows)})")
+                st.caption(why)
+                html("<div class='p9-rules'><span>Règle appliquée</span><ol>"
+                     + "".join(f"<li>{escape(r)}</li>" for r in CHECK_RULES.get(check, [])) + "</ol></div>")
+                if not rows:
+                    st.caption(empty)
+                for item in rows:
+                    _review_card(item)
+            if rv_state.orphans:
+                with st.expander(f"Décisions dont le point n'est plus détecté ({len(rv_state.orphans)})"):
+                    st.caption("L'export a changé et ces points ne sont plus signalés. La décision est gardée tant "
+                               "que vous ne la supprimez pas, mais elle n'est plus appliquée à la traçabilité.")
+                    for d in rv_state.orphans:
+                        o1, o2 = st.columns([4, 1], vertical_alignment="center")
+                        o1.markdown(f"**{ACTION_LABELS[d.action]}** par {d.author} le {d.decided_at} : "
+                                    f"{d.finding_message or d.finding_id}")
+                        o2.button("Supprimer", key=f"rv_orph_{d.finding_id}", on_click=_undo_decision,
+                                  args=(d.finding_id,), width="stretch")
+            with st.expander("Autres contrôles (informatifs)"):
+                _findings_block("User needs non couverts", "uncovered_needs", "Tous les user needs sont servis.")
+                _findings_block("États jamais atteints", "unreachable_states", "Tous les états sont atteints.")
+                _findings_block("Triggers invalides", "invalid_triggers", "Aucun.")
 
-            with right:
-                st.markdown("##### Propositions du LLM")
-                st.caption("Le LLM propose, l'humain valide. Seules les propositions acceptées entrent dans le "
-                           "modèle, dans un fichier séparé, et restent marquées `origin = \"llm\"`. Données envoyées : "
-                           "uniquement les points ci-contre et le nom des éléments voisins (ni biographies, ni images).")
-                llm_ok, llm_label = provider_status(SETTINGS.llm)
-                st.markdown(f"Fournisseur : **{llm_label}**" if llm_ok else f"⚠️ {llm_label}")
+            st.divider()
+            st.markdown("##### Propositions du LLM")
+            st.caption("Le LLM propose, l'humain valide. Seules les propositions acceptées entrent dans le "
+                       "modèle, dans un fichier séparé, et restent marquées `origin = \"llm\"`. Données envoyées : "
+                       "uniquement les points ci-dessus et le nom des éléments voisins (ni biographies, ni images).")
+            llm_ok, llm_label = provider_status(SETTINGS.llm)
+            st.markdown(f"Fournisseur : **{llm_label}**" if llm_ok else f"⚠️ {llm_label}")
 
-                if st.button("Générer des propositions", disabled=not llm_ok):
-                    with st.spinner("Le LLM analyse les points à valider…"):
-                        try:
-                            res = enrich(make_provider(SETTINGS.llm), cached_tool_context(export_key, ex))
-                        except LlmUnavailable as e:
-                            st.error(str(e))
-                        else:
-                            store.merge(res.proposals)
-                            save_store(store, PROPOSALS_PATH)
-                            st.success(f"{len(res.proposals)} proposition(s) reçue(s)"
-                                       + (f", {len(res.invalid)} écartée(s) automatiquement (ids inconnus ou "
-                                          "format invalide)" if res.invalid else ""))
+            if st.button("Générer des propositions", disabled=not llm_ok):
+                try:
+                    provider, tctx = make_provider(SETTINGS.llm), cached_tool_context(export_key, ex)
+                    res = run_live("Le LLM analyse les points à valider", llm_key("enrich"),
+                                   lambda ev: enrich(provider, tctx, on_event=ev))
+                except LlmUnavailable as e:
+                    st.error(str(e))
+                else:
+                    store.merge(res.proposals)
+                    save_store(store, PROPOSALS_PATH)
+                    st.success(f"{len(res.proposals)} proposition(s) reçue(s)"
+                               + (f", {len(res.invalid)} écartée(s) automatiquement (ids inconnus ou "
+                                  "format invalide)" if res.invalid else ""))
 
-                valid_ids = {s.step_id for s in ex.steps} | {f.feedback_id for f in ex.persona_step_feedback} | \
-                            {u.user_need_id for u in ex.user_needs} | {u.use_case_id for u in ex.use_cases} | \
-                            {p.persona_id for p in ex.personas}
-                shown = [p for p in store.proposals if all(t in valid_ids for t in p.target_ids)]
-                if not shown:
-                    st.caption("Aucune proposition pour cet export.")
-                for p in shown:
-                    with st.container(border=True):
-                        st.markdown(badges(p.kind, p.status, f"origin = {p.origin}"), unsafe_allow_html=True)
-                        st.markdown(f"**{p.title}**  \n{p.text}")
-                        html(f"<span class='muted'>{escape(p.rationale)}</span><br>"
-                             f"<span class='ids'>cibles : {' · '.join(p.target_ids)} · id {p.proposal_id}</span>")
-                        b1, b2, _ = st.columns([1, 1, 1.5])
-                        b1.button("Accepter", key=f"acc_{p.proposal_id}", on_click=_decide,
-                                  args=(p.proposal_id, "accepted"), disabled=p.status == "accepted",
-                                  type="primary", width="stretch")
-                        b2.button("Rejeter", key=f"rej_{p.proposal_id}", on_click=_decide,
-                                  args=(p.proposal_id, "rejected"), disabled=p.status == "rejected", width="stretch")
+            valid_ids = {s.step_id for s in ex.steps} | {f.feedback_id for f in ex.persona_step_feedback} | \
+                        {u.user_need_id for u in ex.user_needs} | {u.use_case_id for u in ex.use_cases} | \
+                        {p.persona_id for p in ex.personas}
+            shown = [p for p in store.proposals if all(t in valid_ids for t in p.target_ids)]
+            if not shown:
+                st.caption("Aucune proposition pour cet export.")
+            for p in shown:
+                with st.container(border=True):
+                    st.markdown(badges(p.kind, p.status, f"origin = {p.origin}"), unsafe_allow_html=True)
+                    st.markdown(f"**{p.title}**  \n{p.text}")
+                    html(f"<span class='muted'>{escape(p.rationale)}</span><br>"
+                         f"<span class='ids'>cibles : {' · '.join(p.target_ids)} · id {p.proposal_id}</span>")
+                    b1, b2, _ = st.columns([1, 1, 1.5])
+                    b1.button("Accepter", key=f"acc_{p.proposal_id}", on_click=_decide,
+                              args=(p.proposal_id, "accepted"), disabled=p.status == "accepted",
+                              type="primary", width="stretch")
+                    b2.button("Rejeter", key=f"rej_{p.proposal_id}", on_click=_decide,
+                              args=(p.proposal_id, "rejected"), disabled=p.status == "rejected", width="stretch")
 
     # ---------------------------------------------------------------- assistant (chat)
     if t_chat.open:
@@ -648,13 +982,14 @@ if step == 3:
                     with st.chat_message("user"):
                         st.markdown(question)
                     with st.chat_message("assistant"):
-                        with st.spinner("Interrogation du modèle…"):
-                            try:
-                                ans = ask(make_provider(SETTINGS.llm), cached_tool_context(export_key, ex), question,
-                                          [{"role": t["role"], "content": t["content"]} for t in history])
-                            except LlmUnavailable as e:
-                                st.error(str(e))
-                                st.stop()
+                        try:
+                            past = [{"role": t["role"], "content": t["content"]} for t in history]
+                            provider, tctx = make_provider(SETTINGS.llm), cached_tool_context(export_key, ex)
+                            ans = run_live("L'assistant interroge le modèle", llm_key("chat"),
+                                           lambda ev: ask(provider, tctx, question, past, on_event=ev))
+                        except LlmUnavailable as e:
+                            st.error(str(e))
+                            st.stop()
                         st.markdown(ans.text)
                         tools = [c["name"] for c in ans.tool_calls]
                         if tools:

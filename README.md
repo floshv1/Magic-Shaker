@@ -26,6 +26,23 @@ nouvel onglet, export SVG). Tout est embarqué, aucun accès internet n'est néc
 - `app/static/fonts/` : IBM Plex Sans et Mono (licence OFL, voir `OFL.txt`) ;
 - `.streamlit/config.toml` : thème (couleurs, polices) ; `make demo` doit être lancé depuis la racine.
 
+## Points à valider : décisions humaines
+
+Les contrôles automatiques (`src/p9/checks/consistency.py`, règles affichées dans l'interface) signalent ce
+que le modèle ne peut pas représenter tel quel. Pour chaque point, une personne décide dans l'onglet
+« Points à valider » : ajouter la garde manquante (composant + état, ou condition en texte), créer un
+requirement, rattacher l'insight à un user need existant, renvoyer la correction à UserShaker, ou écarter
+le point avec sa raison. Une proposition du LLM peut être reprise puis modifiée avant d'être enregistrée.
+
+- Les décisions sont signées (nom, date) et enregistrées dans `review/decisions.json`, **à commiter** :
+  l'équipe les partage et `make generate` produit le même modèle partout.
+- Elles sont générées par template dans `ESpaceConceptReview.sysml` (`@ReviewDecision`, `origin = "human"`),
+  séparé du contenu UserShaker, qui n'est jamais modifié.
+- La traçabilité suit : une contrainte en texte libre traitée par une garde passe de `partial` à `mapped`
+  (avec l'auteur), un point écarté garde sa raison ; `out/review.csv` liste toutes les décisions.
+- Un point est reconnu d'un export à l'autre par un id stable ; une décision dont le point a disparu est
+  signalée, pas supprimée.
+
 ## Commandes
 
 | Commande | Effet |

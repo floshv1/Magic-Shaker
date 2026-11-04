@@ -57,7 +57,7 @@ class FakeProvider:
 
     name = "fake"
 
-    def chat_with_tools(self, system, question, history, ctx):
+    def chat_with_tools(self, system, question, history, ctx, on_event=None):
         calls = []
         for name, args in [("constraints_in_text_only", {}), ("implicit_needs", {})]:
             out, err = run_tool(ctx, name, args)
@@ -66,7 +66,7 @@ class FakeProvider:
         return ChatResult(text=f"Contrainte non structuree sur `{first}` ; id invente `zzzzzzzzzzzzzzzzzzzzzzzzz`.",
                           tool_calls=calls, provider=self.name, model="fake")
 
-    def structured(self, system, prompt, schema):
+    def structured(self, system, prompt, schema, on_event=None):
         items = json.loads(prompt.split("\n", 1)[1])
         step = next(i for i in items if i["type"] == "text_constraint")
         return json.dumps({"proposals": [

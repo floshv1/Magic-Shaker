@@ -7,6 +7,8 @@ signalent des points à valider, elles ne corrigent rien.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from collections import defaultdict
 from typing import Literal
@@ -40,6 +42,12 @@ class Finding(BaseModel):
     use_case_id: str | None = None
     step_id: str | None = None
     detail: dict[str, str] = Field(default_factory=dict)
+
+
+def finding_id(f: Finding) -> str:
+    """Id stable d'un point : même contrôle, mêmes ids UserShaker, même phrase → même id (sert aux décisions)."""
+    key = [f.check, sorted(f.ids), f.detail.get("sentence", ""), f.detail.get("index", ""), f.detail.get("role", "")]
+    return hashlib.sha1(json.dumps(key, ensure_ascii=False).encode("utf-8")).hexdigest()[:12]
 
 
 # --------------------------------------------------------------------- outils texte
@@ -333,6 +341,43 @@ ALL_CHECKS = {
     "constraints_in_text_only": constraints_in_text_only,
     "persona_inconsistencies": persona_inconsistencies,
     "implicit_needs": implicit_needs,
+}
+
+
+# Règles appliquées, en langage clair, pour l'interface. À garder alignées sur le code ci-dessus
+# (test_checks vérifie qu'une règle existe pour chaque contrôle).
+CHECK_RULES: dict[str, list[str]] = {
+    "constraints_in_text_only": [
+        "Le trigger_text de chaque step est découpé en phrases.",
+        "La 1re phrase décrit l'événement : elle est couverte si le step a une ligne step_triggers "
+        "de kind = trigger.",
+        "Chaque phrase suivante doit partager au moins un mot (hors mots vides) avec le nom du composant "
+        "ou de l'état d'une ligne kind = condition du même step.",
+        "Sinon, la phrase est signalée ; « seuil numérique » est ajouté si elle contient un chiffre.",
+    ],
+    "persona_inconsistencies": [
+        "Textes lus : story et description du use case, description et trigger_text de ses steps.",
+        "Persona cité par son prénom dans ces textes sans être rattaché au use case (use_case_personas).",
+        "Persona rattaché au use case mais présent (is_present) à aucun de ses steps.",
+        "Conflit de rôle : une phrase donne à X un rôle d'occupant (" + ", ".join(SEAT_ROLES) + ") que la "
+        "biographie attribue à un autre persona Y.",
+        "Renvoi à un autre use case (un marqueur temporel comme after ou before, suivi à moins de 5 mots "
+        "d'au moins 2 mots du nom de ce use case) alors que les personas des deux use cases diffèrent.",
+    ],
+    "implicit_needs": [
+        "Chaque persona_step_feedback dont emotion_score < 0 est retenu.",
+        "Le schéma 1.0 ne relie jamais un feedback à un user need : tous les insights négatifs sont donc "
+        "listés comme besoins implicites possibles.",
+        "Le user need le plus proche est indiqué s'il partage au moins 2 mots avec l'insight.",
+    ],
+    "uncovered_needs": ["User need sans aucune ligne dans step_user_needs."],
+    "unreachable_states": ["État de component_states absent de la grille du blueprint "
+                           "(step_component_states) et de tout step_triggers."],
+    "invalid_triggers": [
+        "L'état visé par un trigger doit exister et appartenir au composant observé.",
+        "Dans un step, la 1re ligne doit être kind = trigger, les suivantes kind = condition.",
+    ],
+    "invalid_grid_states": ["Dans la grille du blueprint, l'état doit appartenir au composant de sa ligne."],
 }
 
 

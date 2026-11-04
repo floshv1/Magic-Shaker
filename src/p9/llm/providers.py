@@ -3,6 +3,11 @@
 Les deux exposent la même interface minimale :
   - `chat_with_tools(system, question, history, ctx)` : boucle d'appels d'outils jusqu'à la réponse ;
   - `structured(system, prompt, schema)` : une réponse JSON conforme au schéma.
+
+Les deux acceptent `on_event(kind, text)` (optionnel) pour suivre l'avancement en direct :
+  - kind = "step"   : une étape (appel au modèle, n° de tour) ;
+  - kind = "tool"   : un outil appelé par le modèle et la taille de sa réponse ;
+  - kind = "tokens" : compteur de génération en cours (Ollama, en streaming), remplace le précédent.
 """
 
 from __future__ import annotations
@@ -11,6 +16,8 @@ import json
 import os
 import urllib.error
 import urllib.request
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -19,6 +26,23 @@ from p9.config import LlmSettings
 from .tools import TOOLS, ToolContext, run_tool
 
 MAX_TOOL_ROUNDS = 12
+
+OnEvent = Callable[[str, str], None]
+
+
+def _emit(on_event: OnEvent | None, kind: str, text: str) -> None:
+    if on_event is not None:
+        on_event(kind, text)
+
+
+def _args_preview(args: dict[str, Any], limit: int = 60) -> str:
+    txt = ", ".join(f"{k}={v!r}" for k, v in args.items())
+    return txt if len(txt) <= limit else txt[: limit - 1] + "…"
+
+
+def _tool_event(on_event: OnEvent | None, name: str, args: dict[str, Any], out: str, err: bool) -> None:
+    status = "erreur" if err else f"{len(out)} caracteres de resultat"
+    _emit(on_event, "tool", f"Outil `{name}`({_args_preview(args)}) : {status}")
 
 
 class LlmUnavailable(RuntimeError):
@@ -84,11 +108,13 @@ class AnthropicProvider:
             raise LlmUnavailable(f"erreur API ({e.status_code}) : {e.message}") from e
 
     def chat_with_tools(self, system: str, question: str, history: list[dict[str, Any]],
-                        ctx: ToolContext) -> ChatResult:
+                        ctx: ToolContext, on_event: OnEvent | None = None) -> ChatResult:
         messages: list[dict[str, Any]] = [*history, {"role": "user", "content": question}]
         calls: list[ToolCall] = []
         tools = self._tools()
-        for _ in range(MAX_TOOL_ROUNDS):
+        for rnd in range(1, MAX_TOOL_ROUNDS + 1):
+            _emit(on_event, "step", f"Appel a Claude ({self.model}), tour {rnd}"
+                  + (" : le modele choisit les outils a interroger" if rnd == 1 else " : lecture des resultats"))
             resp = self._create(system=system, tools=tools, messages=messages)
             if resp.stop_reason == "refusal":
                 return ChatResult(text="Le modele a refuse de repondre a cette question.", tool_calls=calls,
@@ -106,12 +132,15 @@ class AnthropicProvider:
             for u in uses:
                 out, err = run_tool(ctx, u.name, u.input if isinstance(u.input, dict) else {})
                 calls.append(ToolCall(u.name, dict(u.input or {}), out, err))
+                _tool_event(on_event, u.name, dict(u.input or {}), out, err)
                 results.append({"type": "tool_result", "tool_use_id": u.id, "content": out, "is_error": err})
             messages.append({"role": "user", "content": results})   # tous les résultats dans un seul message
         return ChatResult(text="Nombre maximal d'appels d'outils atteint sans reponse finale.", tool_calls=calls,
                           provider=self.name, model=self.model, stop_reason="max_rounds")
 
-    def structured(self, system: str, prompt: str, schema: dict[str, Any]) -> str:
+    def structured(self, system: str, prompt: str, schema: dict[str, Any], on_event: OnEvent | None = None) -> str:
+        _emit(on_event, "step", f"Appel a Claude ({self.model}) : analyse et redaction des propositions "
+                                "(une seule requete, la reponse arrive d'un bloc)")
         resp = self._create(system=system, messages=[{"role": "user", "content": prompt}],
                             output={"format": {"type": "json_schema", "schema": schema}})
         if resp.stop_reason == "refusal":
@@ -130,26 +159,67 @@ class OllamaProvider:
         self.host = cfg.ollama_host.rstrip("/")
         self.model = cfg.ollama_model
 
-    def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _post(self, payload: dict[str, Any], on_event: OnEvent | None = None) -> dict[str, Any]:
+        """POST /api/chat en streaming (NDJSON) ; renvoie un message agrégé comme en mode non streamé.
+
+        Le streaming sert à suivre la génération : tokens de réflexion, puis tokens de réponse."""
+        payload = {**payload, "stream": True}
         req = urllib.request.Request(f"{self.host}/api/chat", data=json.dumps(payload).encode("utf-8"),
                                      headers={"Content-Type": "application/json"})
+        content: list[str] = []
+        thinking: list[str] = []
+        tool_calls: list[dict[str, Any]] = []
+        n_think = n_out = 0
+        last = 0.0
+        final: dict[str, Any] = {}
         try:
             with urllib.request.urlopen(req, timeout=300) as r:  # noqa: S310 (hôte configuré)
-                return json.loads(r.read().decode("utf-8"))
+                for raw in r:
+                    if not raw.strip():
+                        continue
+                    chunk = json.loads(raw.decode("utf-8"))
+                    if chunk.get("error"):
+                        raise LlmUnavailable(f"Ollama : {chunk['error']}")
+                    msg = chunk.get("message") or {}
+                    if msg.get("thinking"):
+                        thinking.append(msg["thinking"])
+                        n_think += 1
+                    if msg.get("content"):
+                        content.append(msg["content"])
+                        n_out += 1
+                    tool_calls.extend(msg.get("tool_calls") or [])
+                    now = time.monotonic()
+                    if now - last > 0.3:
+                        last = now
+                        phase = "redaction de la reponse" if n_out else "reflexion"
+                        _emit(on_event, "tokens", f"{self.model}, {phase} : {n_think} tokens de reflexion, "
+                                                  f"{n_out} tokens de reponse")
+                    if chunk.get("done"):
+                        final = chunk
+                        break
+            _emit(on_event, "tokens", f"{self.model} : {n_think} tokens de reflexion, {n_out} tokens de reponse")
+            message: dict[str, Any] = {"role": "assistant", "content": "".join(content)}
+            if tool_calls:
+                message["tool_calls"] = tool_calls
+            if thinking:
+                message["thinking"] = "".join(thinking)
+            return {"message": message, "done_reason": final.get("done_reason", "")}
         except urllib.error.HTTPError as e:
             raise LlmUnavailable(f"Ollama : erreur {e.code} ({e.read().decode('utf-8', 'replace')[:200]})") from e
         except (urllib.error.URLError, OSError) as e:
             raise LlmUnavailable(f"Ollama injoignable sur {self.host} (lancer `ollama serve`)") from e
 
     def chat_with_tools(self, system: str, question: str, history: list[dict[str, Any]],
-                        ctx: ToolContext) -> ChatResult:
+                        ctx: ToolContext, on_event: OnEvent | None = None) -> ChatResult:
         tools = [{"type": "function", "function": {"name": t.name, "description": t.description,
                                                    "parameters": t.parameters}} for t in TOOLS]
         messages: list[dict[str, Any]] = [{"role": "system", "content": system}, *history,
                                           {"role": "user", "content": question}]
         calls: list[ToolCall] = []
-        for _ in range(MAX_TOOL_ROUNDS):
-            data = self._post({"model": self.model, "messages": messages, "tools": tools, "stream": False})
+        for rnd in range(1, MAX_TOOL_ROUNDS + 1):
+            _emit(on_event, "step", f"Appel a Ollama ({self.model}), tour {rnd}"
+                  + (" : le modele choisit les outils a interroger" if rnd == 1 else " : lecture des resultats"))
+            data = self._post({"model": self.model, "messages": messages, "tools": tools}, on_event)
             msg = data.get("message", {})
             tcalls = msg.get("tool_calls") or []
             if not tcalls:
@@ -166,13 +236,16 @@ class OllamaProvider:
                         args = {}
                 out, err = run_tool(ctx, fn.get("name", ""), args)
                 calls.append(ToolCall(fn.get("name", ""), args, out, err))
+                _tool_event(on_event, fn.get("name", ""), args, out, err)
                 messages.append({"role": "tool", "content": out, "tool_name": fn.get("name", "")})
         return ChatResult(text="Nombre maximal d'appels d'outils atteint sans reponse finale.", tool_calls=calls,
                           provider=self.name, model=self.model, stop_reason="max_rounds")
 
-    def structured(self, system: str, prompt: str, schema: dict[str, Any]) -> str:
-        data = self._post({"model": self.model, "stream": False, "format": schema,
-                           "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]})
+    def structured(self, system: str, prompt: str, schema: dict[str, Any], on_event: OnEvent | None = None) -> str:
+        _emit(on_event, "step", f"Appel a Ollama ({self.model}) : analyse et redaction des propositions")
+        data = self._post({"model": self.model, "format": schema,
+                           "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]},
+                          on_event)
         return data.get("message", {}).get("content", "")
 
 

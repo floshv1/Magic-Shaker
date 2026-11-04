@@ -13,6 +13,7 @@ APP = str(Path(__file__).parents[1] / "app" / "app.py")
 @pytest.fixture
 def app(monkeypatch, tmp_path) -> AppTest:
     monkeypatch.setenv("P9_OUT_DIR", str(tmp_path))          # pas d'écriture dans out/
+    monkeypatch.setenv("P9_REVIEW_FILE", str(tmp_path / "review" / "decisions.json"))   # ni dans review/
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("P9_LLM_PROVIDER", "anthropic")
     at = AppTest.from_file(APP, default_timeout=120)
@@ -111,9 +112,72 @@ def test_points_a_valider(app) -> None:
     _ok(app.run())
     md = _md(app)
     assert "Only below 10 km/h." in md and "front passenger" in md and "clearer distance cue" in md
+    assert md.count("Règle appliquée") >= 3 and "kind = condition" in md     # règles affichées
 
 
 def test_changer_de_fichier_revient_a_l_import(app) -> None:
     _load(app)
     _ok(_button(app, "Changer de fichier").click().run())
     assert "En attente" in _md(app)
+
+
+def _open_review(app: AppTest) -> AppTest:
+    _translate_all(app)
+    tab = next(t.label for t in app.tabs if t.label.startswith("Points à valider"))
+    app.session_state["result_tab"] = tab
+    return _ok(app.run())
+
+
+def _speed_finding_id(export) -> str:
+    from p9.checks import finding_id, run_all
+    f = next(f for f in run_all(export)["constraints_in_text_only"] if "10 km/h" in f.message)
+    return finding_id(f)
+
+
+def test_decision_sans_nom_refusee(app, export) -> None:
+    _open_review(app)
+    fid = _speed_finding_id(export)
+    _ok(app.button(key=f"rv_save_{fid}").click().run())
+    assert any("indiquez votre nom" in e.value for e in app.error)
+
+
+def test_ajouter_une_garde_puis_annuler(app, export, tmp_path) -> None:
+    from p9.review import load_review
+    _open_review(app)
+    fid = _speed_finding_id(export)
+    total = len(load_review(tmp_path / "review" / "decisions.json").decisions)
+    app.text_input(key="rv_author").set_value("Testeur")
+    _ok(app.run())
+    assert app.radio(key=f"rv_mode_{fid}").value.startswith("Condition décrite en texte")   # phrase avec un chiffre
+    app.text_area(key=f"rv_text_{fid}").set_value("vitesse du véhicule < 10 km/h")
+    _ok(app.button(key=f"rv_save_{fid}").click().run())
+    saved = load_review(tmp_path / "review" / "decisions.json")
+    d = saved.get(fid)
+    assert len(saved.decisions) == total + 1 and d.action == "guard" and d.author == "Testeur"
+    md = _md(app)
+    assert "Garde ajoutée" in md and "par Testeur" in md
+    # la traçabilité suit : la contrainte n'est plus « partielle »
+    app.session_state["result_tab"] = "Fichiers .sysml"
+    _ok(app.run())
+    assert any(t.label == "ESpaceConceptReview.sysml" for t in app.tabs)
+    tab = next(t.label for t in app.tabs if t.label.startswith("Points à valider"))
+    app.session_state["result_tab"] = tab
+    _ok(app.run())
+    _ok(app.button(key=f"rv_undo_{fid}").click().run())
+    assert load_review(tmp_path / "review" / "decisions.json").get(fid) is None
+
+
+def test_ecarter_exige_une_raison(app, export, tmp_path) -> None:
+    from p9.review import load_review
+    _open_review(app)
+    fid = _speed_finding_id(export)
+    app.text_input(key="rv_author").set_value("Testeur")
+    _ok(app.run())
+    app.radio(key=f"rv_act_{fid}").set_value("Écarter ce point")
+    _ok(app.run())
+    _ok(app.button(key=f"rv_save_{fid}").click().run())
+    assert any("raison" in e.value for e in app.error)
+    app.text_area(key=f"rv_reason_{fid}").set_value("la vitesse est gérée hors parcours")
+    _ok(app.button(key=f"rv_save_{fid}").click().run())
+    assert load_review(tmp_path / "review" / "decisions.json").get(fid).action == "dismiss"
+    assert "Écarté" in _md(app)

@@ -35,6 +35,8 @@ markers = ["omg: lance le parseur OMG SysML v2 (lent ; `make test-omg`)"]
 [tool.p9]
 data_dir = "data/usershaker"
 out_dir = "out"
+# Décisions humaines sur les points à valider : versionnées dans git (partagées par l'équipe).
+review_file = "review/decisions.json"
 
 # Noms des packages et du système générés (propres au projet, donc ici et pas dans le code).
 [tool.p9.generate]

@@ -1,0 +1,43 @@
+{% import "_macros.sysml.j2" as m %}
+{% macro origin(it, ind) -%}
+{{ ind }}@ReviewDecision { origin = "human"; decisionKind = {{ it.meta.action | q }}; author = {{ it.meta.author | q }}; decidedAt = {{ it.meta.decided_at | q }}; findingId = {{ it.meta.finding_id | q }}; basedOn = {{ it.meta.based_on | q }}; llmProposalId = {{ it.meta.llm_proposal_id | q }}; }
+{%- endmacro %}
+package {{ package }} {
+    doc /* Decisions humaines sur les points a valider (contraintes en texte libre, besoins implicites) :
+     * gardes et requirements ajoutes, rattachements a des user needs existants. Contenu separe du modele
+     * d'origine UserShaker : chaque element porte ReviewDecision (origin = "human"). */
+    private import ScalarValues::*;
+    private import {{ common }}::*;
+{% for i in imports %}
+    private import {{ i }}::*;
+{% endfor %}
+
+    metadata def ReviewDecision {
+        attribute origin : String;
+        attribute decisionKind : String;
+        attribute author : String;
+        attribute decidedAt : String;
+        attribute findingId : String;
+        attribute basedOn : String;
+        attribute llmProposalId : String;
+    }
+{% for it in items %}
+
+{% if it.kind == "guard" %}
+    constraint def {{ it.name }} {
+{{ origin(it, "        ") }}
+{{ m.doc(it.doc, "        ") }}
+    }
+{% elif it.kind == "requirement" %}
+    requirement def {{ it.name }} {
+{{ origin(it, "        ") }}
+{{ m.doc(it.doc, "        ") }}
+    }
+{% endif %}
+{% for src, dst in it.dependencies %}
+    dependency from {{ src }} to {{ dst }} {
+{{ origin(it, "        ") }}
+    }
+{% endfor %}
+{% endfor %}
+}

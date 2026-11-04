@@ -23,9 +23,14 @@ def main(argv: list[str]) -> int:
     # Propositions LLM acceptées par un humain (out/proposals.json), rendues dans un package séparé.
     from p9.llm.enrich import load_store
     accepted = load_store(s.out_dir / "proposals.json").accepted()
-    gen = generate(ex, cfg=s.generate, accepted_proposals=accepted)
+    # Décisions humaines sur les points à valider (review/decisions.json, versionné).
+    from p9.review import load_review
+    decisions = load_review(s.review_file).decisions
+    gen = generate(ex, cfg=s.generate, accepted_proposals=accepted, review_decisions=decisions)
     if accepted:
         print(f"{len(accepted)} proposition(s) LLM acceptee(s) incluse(s) (package separe, origin=llm)")
+    if decisions:
+        print(f"{len(decisions)} decision(s) humaine(s) prise(s) en compte (package separe, origin=human)")
     for p in write(gen, s.out_dir):
         print(f"ecrit {p.relative_to(s.root)}")
     print(f"{len(gen.trace)} lignes de tracabilite, sha256 {gen.digest()[:16]}")

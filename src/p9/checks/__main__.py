@@ -24,9 +24,13 @@ def main(argv: list[str]) -> int:
     except ExportUnreadable as e:
         print(f"Erreur : {e}")
         return 2
-    gen = generate(ex, cfg=s.generate)
+    from p9.llm.enrich import load_store
+    from p9.review import load_review, review_csv
+    review = load_review(s.review_file)
+    gen = generate(ex, cfg=s.generate, accepted_proposals=load_store(s.out_dir / "proposals.json").accepted(),
+                   review_decisions=review.decisions)
     findings = run_all(ex)
-    matrix = build_matrix(ex, gen, findings["constraints_in_text_only"])
+    matrix = build_matrix(ex, gen, findings["constraints_in_text_only"], review.decisions)
     cov = coverage(ex, gen, matrix)
     s.out_dir.mkdir(parents=True, exist_ok=True)
     (s.out_dir / "traceability.csv").write_bytes(matrix_csv(matrix).encode("utf-8"))
@@ -34,7 +38,9 @@ def main(argv: list[str]) -> int:
     (s.out_dir / "findings.json").write_bytes(json.dumps(
         {k: [f.model_dump() for f in v] for k, v in findings.items()}, ensure_ascii=False, indent=2).encode("utf-8"))
 
-    print(f"{len(matrix)} lignes dans out/traceability.csv")
+    (s.out_dir / "review.csv").write_bytes(review_csv(review).encode("utf-8"))
+
+    print(f"{len(matrix)} lignes dans out/traceability.csv, {len(review.decisions)} decision(s) dans out/review.csv")
     for kind, c in status_counts(matrix).items():
         print(f"  {kind:<24} " + "  ".join(f"{k}={v}" for k, v in sorted(c.items())))
     for r in cov:

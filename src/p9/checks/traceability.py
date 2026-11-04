@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from p9.generate import Generated, TraceEntry, link_id
 from p9.ingest import SHEETS, Export
 
-from .consistency import Finding, constraints_in_text_only
+from .consistency import Finding, constraints_in_text_only, finding_id
 
 KIND_OF_SHEET = {
     "use_cases": "use_case", "step_groups": "step_group", "steps": "step", "step_triggers": "step_trigger",
@@ -45,7 +45,10 @@ def _owner_use_case(ex: Export, sheet: str, row) -> str | None:
     return None
 
 
-def build_matrix(ex: Export, gen: Generated, findings: list[Finding] | None = None) -> list[TraceEntry]:
+def build_matrix(ex: Export, gen: Generated, findings: list[Finding] | None = None,
+                 decisions: list | None = None) -> list[TraceEntry]:
+    """`decisions` : décisions humaines (p9.review) ; une contrainte en texte libre traitée par une garde
+    ou écartée change de statut, avec l'auteur, la date et la raison."""
     produced: dict[tuple[str, str], TraceEntry] = {}
     for e in gen.trace:
         produced.setdefault((e.kind, e.usershaker_id), e)
@@ -63,18 +66,32 @@ def build_matrix(ex: Export, gen: Generated, findings: list[Finding] | None = No
                 reason = "use case non selectionne" if owner and owner not in selected else "non traduit par le generateur"
                 e = TraceEntry(usershaker_id=key, kind=kind, status="not_mapped", reason=reason)
             out.append(e)
-    # Contraintes vues uniquement dans le texte libre : perte d'information explicite.
+    # Contraintes vues uniquement dans le texte libre : perte d'information explicite, sauf décision humaine
+    # (garde ajoutée, ou point écarté avec sa raison).
+    by_finding = {d.finding_id: d for d in decisions or []}
     for f in findings if findings is not None else constraints_in_text_only(ex):
         if f.check != "constraints_in_text_only" or (f.use_case_id and f.use_case_id not in selected):
             continue
         step_entry = produced.get(("step", f.step_id or ""))
-        out.append(TraceEntry(
+        sentence = f.detail.get("sentence", "")
+        entry = TraceEntry(
             usershaker_id=f"{f.step_id}#trigger_text[{f.detail.get('index', '?')}]", kind="text_constraint",
             sysml_qualified_name=f"{step_entry.sysml_qualified_name}::triggerText" if step_entry else "",
             status="partial",
-            reason=f"contrainte seulement en texte libre (commentaire), sans garde structuree : {f.detail.get('sentence', '')}",
+            reason=f"contrainte seulement en texte libre (commentaire), sans garde structuree : {sentence}",
             file=step_entry.file if step_entry else "",
-        ))
+        )
+        d = by_finding.get(finding_id(f))
+        guard = produced.get(("review_decision", d.finding_id)) if d is not None else None
+        if d is not None and d.action == "guard" and guard is not None and guard.status != "not_mapped":
+            entry = entry.model_copy(update={
+                "sysml_qualified_name": guard.sysml_qualified_name, "status": guard.status, "file": guard.file,
+                "reason": f"garde ajoutee par {d.author} le {d.decided_at} (origin=human) : {sentence}"})
+        elif d is not None and d.action == "dismiss":
+            entry = entry.model_copy(update={
+                "status": "mapped",
+                "reason": f"ecarte par {d.author} le {d.decided_at} : {d.reason.strip()} ({sentence})"})
+        out.append(entry)
     order = {k: i for i, k in enumerate(KIND_ORDER)}
     return sorted(out, key=lambda e: (order.get(e.kind, 99), e.usershaker_id))
 

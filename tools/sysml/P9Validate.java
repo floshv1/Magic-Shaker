@@ -39,6 +39,7 @@ public class P9Validate {
             {"Kernel_Libraries", ".kerml"}, {"Systems_Library", ".sysml"}, {"Domain_Libraries", ".sysml"},
         };
         for (String[] p : parts) {
+            stage("library", p[0]);
             File dir = new File(lib + p[0]);
             if (!dir.isDirectory()) {
                 System.err.println("bibliotheque incomplete : " + dir);
@@ -51,6 +52,7 @@ public class P9Validate {
         int totalErrors = 0;
         for (int i = 1; i < args.length; i++) {
             File f = new File(args[i]);
+            stage("file", f.getName());
             String text = new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8);
             Object result = process.invoke(repl, text);
             Class<?> rc = result.getClass();
@@ -75,6 +77,12 @@ public class P9Validate {
         }
         System.out.flush();
         System.exit(totalErrors > 0 ? 1 : 0);
+    }
+
+    /** Avancement (lu en direct par sysml_parser.py) : STAGE|library|nom ou STAGE|file|nom. */
+    private static void stage(String kind, String name) {
+        System.out.println("STAGE|" + kind + "|" + name);
+        System.out.flush();
     }
 
     private static void emit(String file, String sev, int line, int col, String msg) {
