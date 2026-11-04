@@ -43,6 +43,11 @@ common_package = "ESpaceCommon"
 system_name = "ESpace"
 subject_name = "vehicle"
 
+# Sortie CATIA Community (out/catia/) : limites constatees de l'edition gratuite 2026x.
+[tool.p9.catia]
+char_limit = 20000     # l'editeur textuel refuse au-dela (par espace de noms racine)
+char_budget = 19000    # cible du generateur : marge pour les vues ajoutees a la main et le reformatage CATIA
+
 # LLM (enrichissement + chat). Surchargeable : P9_LLM_PROVIDER, P9_LLM_MODEL, P9_LLM_EFFORT,
 # OLLAMA_HOST, P9_OLLAMA_MODEL. La cle ANTHROPIC_API_KEY va dans .env (jamais commitee).
 [tool.p9.llm]

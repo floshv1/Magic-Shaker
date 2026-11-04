@@ -1,0 +1,127 @@
+{#- Sortie CATIA Community : un package autonome par use case (voir generate/catia.py).
+    Pas de commentaires // (comptés dans la limite de caractères, retirés par CATIA à la synchro).
+    Métadonnées écrites avec :>> comme CATIA les réécrit : la taille mesurée est celle affichée dans CATIA. -#}
+{% import "_macros.sysml.j2" as m %}
+{% macro ref(id, kind) -%}
+@UserShakerRef { :>> id = {{ id | q }};{% if with_kind %} :>> kind = {{ kind | q }};{% endif %} }
+{%- endmacro %}
+{% macro step(s, ind) -%}
+{{ ind }}action {{ s.name }} {
+{{ ind }}    {{ ref(s.id, "step") }}
+{{ m.doc(s.doc, ind ~ "    ") }}
+{% for name, text in s.comments %}
+{{ m.comment(name, text, ind ~ "    ") }}
+{% endfor %}
+{{ ind }}}
+{%- endmacro %}
+package {{ package }} {
+{% if project_id %}
+    {{ ref(project_id, "project") }}
+{% endif %}
+{{ m.doc(doc, "    ") }}
+    private import ScalarValues::*;
+    metadata def UserShakerRef {
+        attribute id : String;
+{% if with_kind %}
+        attribute kind : String;
+{% endif %}
+    }
+    part def Persona {
+        attribute ageCategory : String;
+        attribute gender : String;
+    }
+{% for p in personas %}
+    part {{ p.name }} : Persona {
+        {{ ref(p.id, "persona") }}
+{{ m.doc(p.doc, "        ") }}
+{% for k, v in p.attrs %}
+        :>> {{ k }} = {{ v | q }};
+{% endfor %}
+    }
+{% endfor %}
+{% for c in components %}
+    part def {{ c.name }} {
+        {{ ref(c.id, "component") }}
+{{ m.doc(c.doc, "        ") }}
+{% if c.state_def %}
+        exhibit state states : {{ c.state_def }};
+{% endif %}
+    }
+{% endfor %}
+    part def {{ system }} {
+{% for pn, pt in system_parts %}
+        part {{ pn }} : {{ pt }};
+{% endfor %}
+    }
+{% for e in events %}
+    item def {{ e.name }};
+{% endfor %}
+{% for sd in state_defs %}
+    state def {{ sd.name }} {
+        entry; then {{ sd.initial }};
+{% for s in sd.states %}
+{% if s.doc %}
+        state {{ s.name }} {
+{{ m.doc(s.doc, "            ") }}
+        }
+{% else %}
+        state {{ s.name }};
+{% endif %}
+{% endfor %}
+{% for g in sd.guards %}
+        attribute {{ g.name }} : Boolean;
+{% endfor %}
+{% for t in sd.transitions %}
+        transition {{ t.name }} first {{ t.source }}{% if t.accept %} accept {{ t.accept }}{% endif %}{% if t.guards %} if {{ t.guards | join(" and ") }}{% endif %} then {{ t.target }};
+{% endfor %}
+    }
+{% endfor %}
+{% for r in requirements %}
+    requirement def {{ r.name }} {
+        {{ ref(r.id, "user_need") }}
+{{ m.doc(r.doc, "        ") }}
+    }
+{% endfor %}
+    use case def {{ name }} {
+        {{ ref(id, "use_case") }}
+{{ m.doc(uc_doc, "        ") }}
+{% if story %}
+{{ m.comment("story", story, "        ") }}
+{% endif %}
+        subject {{ subject }} : {{ system }};
+{% for a in actors %}
+        actor {{ a.name }} : Persona :> {{ a.persona }};
+{% endfor %}
+        first start;
+{% for item in flow %}
+{% if item.kind == "phase" %}
+        then action {{ item.name }} {
+            {{ ref(item.id, "step_group") }}
+{{ m.doc(item.doc, "            ") }}
+            first start;
+{% for s in item.steps %}
+            then {{ step(s, "            ") | trim }}
+{% endfor %}
+            then done;
+        }
+{% else %}
+        then {{ step(item, "        ") | trim }}
+{% endif %}
+{% endfor %}
+        then done;
+    }
+{% for d in dependencies %}
+{% if dependency_refs %}
+    dependency from {{ d.source }} to {{ d.target }} { {{ ref(d.id, "step_user_need") }} }
+{% else %}
+    dependency from {{ d.source }} to {{ d.target }};
+{% endif %}
+{% endfor %}
+{% for v in views %}
+    view {{ v.name }} : {{ v.type }} {
+{% for e in v.expose %}
+        expose {{ e }};
+{% endfor %}
+    }
+{% endfor %}
+}

@@ -20,7 +20,7 @@ import streamlit as st
 from p9.checks import build_matrix, coverage, matrix_csv, run_all
 from p9.checks import sysml_parser
 from p9.config import load_settings
-from p9.generate import Diagram, build_diagrams, generate, make_zip
+from p9.generate import Diagram, build_diagrams, generate, generate_catia, make_zip
 from p9.ingest import REQUIRED_SHEETS, Export, ExportUnreadable, load_dir, load_zip, use_case_summaries
 from p9.llm import (
     LlmUnavailable,
@@ -153,6 +153,11 @@ def cached_generate(key: str, _ex: Export, selected: tuple[str, ...], accepted_j
     findings = run_all(_ex)
     matrix = build_matrix(_ex, gen, findings["constraints_in_text_only"])
     return gen, matrix, coverage(_ex, gen, matrix), matrix_csv(matrix)
+
+
+@st.cache_data(show_spinner="Fichiers CATIA…")
+def cached_catia(key: str, _ex: Export, selected: tuple[str, ...]):
+    return generate_catia(_ex, list(selected), SETTINGS.generate, SETTINGS.catia)
 
 
 @st.cache_data(show_spinner="Dessin des diagrammes…")
@@ -454,6 +459,7 @@ if step == 3:
     accepted = ProposalStore(proposals=store.accepted())
     gen, matrix, cov, trace_csv = cached_generate(
         f"{export_key}|{'|'.join(translated)}", ex, translated, accepted.model_dump_json())
+    catia_files = cached_catia(f"{export_key}|{'|'.join(translated)}", ex, translated)
     findings = cached_findings(export_key, ex)
     n_review = sum(len(findings[k]) for k in ("constraints_in_text_only", "persona_inconsistencies", "implicit_needs"))
 
@@ -466,9 +472,11 @@ if step == 3:
     head[1].button("Modifier la sélection", on_click=go, args=(2,), width="stretch")
     bundle = dict(gen.files)
     bundle["traceability.csv"] = trace_csv
+    bundle.update({f"catia/{f.name}": f.text for f in catia_files})
     head[2].download_button("Télécharger le modèle (.zip)", make_zip(bundle), file_name="sysml_export.zip",
                             mime="application/zip", type="primary", width="stretch",
-                            help="Fichiers .sysml (commun + un par use case) et traceability.csv")
+                            help="Fichiers .sysml (commun + un par use case), traceability.csv, et catia/ : "
+                                 "un fichier autonome par use case pour CATIA Community")
     if translated != selected:
         st.info("La sélection a changé depuis cette traduction. Revenez à l'étape Choisir pour traduire à nouveau.")
     _ledger(matrix)
@@ -528,6 +536,17 @@ if step == 3:
                     st.download_button(f"Télécharger {name}", src.encode("utf-8"), file_name=name,
                                        mime="text/plain", key=f"dl_{name}")
                     st.code(src, language=None, line_numbers=True, height=480)
+            st.markdown("**Pour CATIA Magic Community**")
+            st.caption(f"L'éditeur textuel de l'édition gratuite refuse plus de {SETTINGS.catia.char_limit:,} "
+                       "caractères : un fichier autonome par use case, à coller dans l'éditeur textuel d'un nouveau "
+                       "projet puis Alt+S (affichage des vues : voir le README). Ce qui est laissé de côté est noté "
+                       "par `make trace`.")
+            for f in catia_files:
+                left, right = st.columns([2, 3], vertical_alignment="center")
+                left.download_button(f"Télécharger {f.name}", f.text.encode("utf-8"), file_name=f.name,
+                                     mime="text/plain", key=f"dl_catia_{f.name}", width="stretch")
+                right.caption(f"{f.chars:,} / {SETTINGS.catia.char_limit:,} caractères"
+                              + (f" · réductions : {', '.join(f.trims)}" if f.trims else " · aucune réduction"))
             with st.expander(f"Matrice de traçabilité complète ({len(matrix)} lignes)"):
                 df = pd.DataFrame([e.model_dump() for e in matrix])
                 status = st.multiselect("Statut", ["mapped", "partial", "not_mapped"],

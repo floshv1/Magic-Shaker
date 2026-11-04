@@ -1,4 +1,4 @@
-"""`python -m p9.generate` : export → out/sysml/*.sysml + out/model.sysml."""
+"""`python -m p9.generate` : export → out/sysml/*.sysml + out/model.sysml + out/catia/*.sysml."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import sys
 from p9.config import load_settings
 from p9.ingest import ExportUnreadable, load_path
 
-from . import generate, write
+from . import generate, generate_catia, write, write_catia
 
 
 def main(argv: list[str]) -> int:
@@ -29,6 +29,19 @@ def main(argv: list[str]) -> int:
     for p in write(gen, s.out_dir):
         print(f"ecrit {p.relative_to(s.root)}")
     print(f"{len(gen.trace)} lignes de tracabilite, sha256 {gen.digest()[:16]}")
+
+    # Sortie CATIA Community : un fichier autonome par use case, sous la limite de l'éditeur textuel.
+    catia = generate_catia(ex, cfg=s.generate, catia=s.catia)
+    write_catia(catia, s.out_dir)
+    over = []
+    for f in catia:
+        flag = "" if f.chars <= s.catia.char_limit else "  DEPASSE LA LIMITE CATIA"
+        print(f"ecrit out/catia/{f.name} : {f.chars}/{s.catia.char_limit} caracteres, ~{f.declarations} "
+              f"declarations{flag}" + (f" (reductions : {', '.join(f.trims)})" if f.trims else ""))
+        if flag:
+            over.append(f.name)
+    if over:
+        print(f"Attention : {len(over)} fichier(s) CATIA trop long(s) meme apres reductions : {over}")
     return 0
 
 

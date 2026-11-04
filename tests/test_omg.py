@@ -50,6 +50,16 @@ def test_fichier_unique_et_propositions_llm_passent_le_parseur(export, tmp_path)
 
 
 @pytest.mark.skipif(not is_installed(), reason="parseur OMG absent (make validate-setup)")
+def test_fichiers_catia_passent_le_parseur(export, tmp_path) -> None:
+    from p9.checks.sysml_parser import catia_prelude
+    from p9.generate import generate_catia
+    files = {f.name: f.text for f in generate_catia(export)}
+    res = validate_texts(files, tmp_path / "catia", prelude=[catia_prelude()])
+    assert res.ok, [i.model_dump() for i in res.issues][:10]
+    assert len(res.files) == 1 + len(files)
+
+
+@pytest.mark.skipif(not is_installed(), reason="parseur OMG absent (make validate-setup)")
 def test_erreur_detectee(tmp_path) -> None:
     res = validate_texts({"bad.sysml": "package Bad { part x : Inconnu; }\n"}, tmp_path / "bad")
     assert not res.ok

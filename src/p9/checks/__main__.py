@@ -1,4 +1,5 @@
-"""`python -m p9.checks` : out/traceability.csv, out/coverage.html, out/findings.json.
+"""`python -m p9.checks` : out/traceability.csv, out/coverage.html, out/findings.json,
+et une matrice par fichier CATIA (out/catia/<UC>.traceability.csv).
 
 Code retour 1 si un contrôle bloquant échoue (comptes, clés étrangères, triggers invalides,
 élément non traduit d'un use case généré).
@@ -10,7 +11,7 @@ import json
 import sys
 
 from p9.config import load_settings
-from p9.generate import generate
+from p9.generate import generate, generate_catia
 from p9.ingest import ExportUnreadable, load_path
 
 from . import build_matrix, coverage, coverage_html, matrix_csv, run_all, status_counts
@@ -40,6 +41,18 @@ def main(argv: list[str]) -> int:
         print(f"  {r.element:<28} {r.translated:>3}/{r.in_export:<3} {r.percent_label:>6}  {r.note}")
     for name, items in findings.items():
         print(f"  [{name}] {len(items)}")
+
+    # Fichiers CATIA : ce qui n'y est pas (hors du use case, réductions) est not_mapped / partial
+    # avec sa raison. Information, pas blocage : la référence reste le modèle complet ci-dessus.
+    catia_dir = s.out_dir / "catia"
+    catia_dir.mkdir(parents=True, exist_ok=True)
+    for f in generate_catia(ex, cfg=s.generate, catia=s.catia):
+        cmatrix = build_matrix(ex, f.gen, findings["constraints_in_text_only"])
+        name = f.name.removesuffix(".sysml") + ".traceability.csv"
+        (catia_dir / name).write_bytes(matrix_csv(cmatrix).encode("utf-8"))
+        rows = [r for r in coverage(ex, f.gen, cmatrix) if r.in_export]
+        print(f"  out/catia/{name} : " + ", ".join(f"{r.element} {r.translated}+{r.partial}p/{r.in_export}"
+                                                   for r in rows))
 
     blocking = (not ex.report.ok
                 or bool(findings["invalid_triggers"]) or bool(findings["invalid_grid_states"])
