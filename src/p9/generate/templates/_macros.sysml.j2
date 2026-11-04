@@ -1,0 +1,10 @@
+{#- Macros partagées. `ind` = indentation (chaîne d'espaces). -#}
+{% macro ref(id, kind, ind) -%}
+{{ ind }}@UserShakerRef { id = {{ id | q }}; kind = {{ kind | q }}; }
+{%- endmacro %}
+{% macro doc(text, ind) -%}
+{{ text | doc_block(ind) }}
+{%- endmacro %}
+{% macro comment(name, text, ind) -%}
+{{ text | comment_block(name, ind) }}
+{%- endmacro %}

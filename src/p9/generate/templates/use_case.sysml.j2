@@ -1,0 +1,68 @@
+{% import "_macros.sysml.j2" as m %}
+{% macro step(s, ind) -%}
+{{ ind }}action {{ s.name }} {
+{{ m.ref(s.id, "step", ind ~ "    ") }}
+{{ m.doc(s.doc, ind ~ "    ") }}
+{% for name, text in s.comments %}
+{{ m.comment(name, text, ind ~ "    ") }}
+{% endfor %}
+{% for f in s.feedback %}
+{{ ind }}    attribute {{ f.name }} : PersonaFeedback {
+{{ m.ref(f.id, "persona_step_feedback", ind ~ "        ") }}
+{{ m.doc(f.doc, ind ~ "        ") }}
+{% for k, v in f.fields %}
+{{ ind }}        :>> {{ k }} = {{ v }};
+{% endfor %}
+{{ ind }}    }
+{% endfor %}
+{{ ind }}}
+{%- endmacro %}
+package {{ package }} {
+    private import {{ common }}::*;
+
+    use case def {{ name }} {
+{{ m.ref(id, "use_case", "        ") }}
+{{ m.doc(doc, "        ") }}
+{% if story %}
+{{ m.comment("story", story, "        ") }}
+{% endif %}
+        subject {{ subject }} : {{ system }};
+{% for a in actors %}
+        actor {{ a.name }} : Persona :> {{ a.persona }} {
+{{ m.ref(a.id, "use_case_persona", "            ") }}
+        }
+{% endfor %}
+{% for c in components %}
+        ref part {{ c.name }} : {{ c.type }} {
+{{ m.ref(c.id, "use_case_component", "            ") }}
+        }
+{% endfor %}
+
+        first start;
+{% for item in flow %}
+{% if item.kind == "phase" %}
+        then action {{ item.name }} {
+{{ m.ref(item.id, "step_group", "            ") }}
+{{ m.doc(item.doc, "            ") }}
+            first start;
+{% for s in item.steps %}
+            then {{ step(s, "            ") | trim }}
+{% endfor %}
+            then done;
+        }
+{% else %}
+        then {{ step(item, "        ") | trim }}
+{% endif %}
+{% endfor %}
+        then done;
+    }
+{% if dependencies %}
+
+    // step -> user need servi (step_user_needs)
+{% for d in dependencies %}
+    dependency from {{ d.source }} to {{ d.target }} {
+{{ m.ref(d.id, "step_user_need", "        ") }}
+    }
+{% endfor %}
+{% endif %}
+}
