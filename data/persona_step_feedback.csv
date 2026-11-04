@@ -1,0 +1,55 @@
+﻿feedback_id,step_id,persona_id,is_present,action,insight,emotion_score
+cf89588ad9b81a32a2cbc938c,ca6a28c3a5de9f53f25190ec3,c141266c3c58944faf796e515,true,Follows with a small suitcase.,Notices the lights and knows which car is theirs.,1
+c3cdbd1d38cb20643f9a1534f,ca6a28c3a5de9f53f25190ec3,ca900b535b5e949b19c8504f9,true,Walks to the car carrying bags.,"Hands full, doesn't want to look for a key.",1
+cfacdd7a2c97e5d4c0f5d6517,cf89cc35b7d46329ff676c9a3,c141266c3c58944faf796e515,true,Waits for the rear door to open.,Likes not having to pull a heavy door.,1
+c0cf4a2fddb7bdafe66f90168,cf89cc35b7d46329ff676c9a3,ca900b535b5e949b19c8504f9,true,Loads the bags without putting them down.,Relieved not to juggle bags and keys.,2
+cbea28e4797f3cc04c1ac92b7,ceb27d2f461220188e325ae59,c141266c3c58944faf796e515,true,Steps in without a sill.,"Afraid of tripping in a tall car, reassured by the flat floor.",1
+cc85f164c8fad3a8b5349a9be,ceb27d2f461220188e325ae59,ca900b535b5e949b19c8504f9,true,Holds the door area clear for her father.,Worried he might trip getting in.,0
+cf497f409ef04af8251ac4118,cf9cb0df80d56f63501e1fe1f,c141266c3c58944faf796e515,true,Sits down and fastens his belt.,Likes being greeted by name.,2
+cad97446858d7ddb019fb9a1d,cf9cb0df80d56f63501e1fe1f,ca900b535b5e949b19c8504f9,true,Sits down at the wheel position.,Likes seeing everyone greeted by name.,2
+c2aede250216af87b05f745dc,c4d181107305695bc6c45794a,c141266c3c58944faf796e515,true,Watches from the back.,Surprised there is no full steering wheel.,0
+c4a8784917fcded325b8f582d,c4d181107305695bc6c45794a,ca900b535b5e949b19c8504f9,true,Watches the wheel come out.,Wants to be sure it's locked before driving.,2
+c40fd443b0fc6e8cb46b12812,cc696a318b1b31024cf945700,c141266c3c58944faf796e515,true,Settles in for the trip.,"Calm cabin, ready to relax.",2
+c60b7ef5cd5deb5273c6dfd72,cc696a318b1b31024cf945700,ca900b535b5e949b19c8504f9,true,Drives off.,"Everything is set, nothing to adjust.",3
+c5809eff16bfb6a40d6774acc,c6ae38e6328eb5108da183701,c141266c3c58944faf796e515,true,Listens.,Finds the music too loud after an hour.,-1
+c2e2f6469009a40a77438eb97,c6ae38e6328eb5108da183701,c0e9ee1f464e55f6e033d37db,true,Listens to the playlist.,Not her music.,-1
+cf4608593831775259ffd5b22,c6ae38e6328eb5108da183701,ca900b535b5e949b19c8504f9,true,Drives on the motorway.,Enjoys the music at first.,1
+cf551e5f9c16eb5f47b1e2877,c8c61483641fd1f6a915f7002,c141266c3c58944faf796e515,true,Watches Léa play.,Now two sounds compete in the cabin.,-2
+c52f6f872ac203fc5dd91cf2a,c8c61483641fd1f6a915f7002,c0e9ee1f464e55f6e033d37db,true,Starts a game.,"Wants the game sound, not the playlist.",2
+c6454efa0d8b4a7a4fed53096,c8c61483641fd1f6a915f7002,ca900b535b5e949b19c8504f9,true,Keeps driving.,Glad Léa is busy.,1
+cff8ba8a0c9c713221cc39697,ca3778fe90c374c32d06c16eb,c141266c3c58944faf796e515,true,Sets his seat to silence.,Gets his quiet without asking Léa to stop.,2
+c047b30fe11ead1b515fb5c78,ca3778fe90c374c32d06c16eb,c0e9ee1f464e55f6e033d37db,true,Gets her game sound in her seat.,Can turn it up without being told off.,3
+c2d2094966c2d1840ce640f5f,ca3778fe90c374c32d06c16eb,ca900b535b5e949b19c8504f9,true,Keeps her navigation audio.,Cabin feels calmer.,1
+c414fbe0a3ad8d94ff2aaf80d,cb4ffb4145d120ba295e9f3b8,c141266c3c58944faf796e515,true,Hears the instruction faintly.,"Fine, it is short.",0
+c9bc79df9a209512bb6d8c893,cb4ffb4145d120ba295e9f3b8,c0e9ee1f464e55f6e033d37db,true,Her game sound dips for a moment.,Hardly notices.,0
+c15f8636f6e0c05df9b9525a3,cb4ffb4145d120ba295e9f3b8,ca900b535b5e949b19c8504f9,true,Hears the exit clearly.,No need to turn everyone down by hand.,1
+c9b2674bd06e2e88ecc77a98f,c25905030fba15e903322ccac,c141266c3c58944faf796e515,true,Back to silence.,Comfortable trip.,2
+c0245f4952b837c064fffdef0,c25905030fba15e903322ccac,c0e9ee1f464e55f6e033d37db,true,Keeps playing.,Barely noticed the interruption.,2
+cd67230819884de005473601e,c25905030fba15e903322ccac,ca900b535b5e949b19c8504f9,true,Takes the exit.,Confident she did not miss anything.,2
+cecb9efa15827be1cb18ae034,ccafd2e9b86aed8119a93ce82,ca900b535b5e949b19c8504f9,true,Drives through town.,A lot to watch in narrow streets.,0
+c8a0625a2443b40194b8f5009,c3969576df5e74ec6d9fa5116,ca900b535b5e949b19c8504f9,true,Looks for a space.,Tight spaces stress her in a large car.,-2
+c03d67eaae401d4443f62231b,ca3ca8969f3f3c09ce88d1281,ca900b535b5e949b19c8504f9,true,Turns without crossing her hands.,Surprised how little she needs to turn.,2
+cb468f5cf09be9ad04a7e2bbb,c73d95ae3702df87fa8706960,ca900b535b5e949b19c8504f9,true,Stops just in time.,Wants a clearer distance cue.,-1
+cf7060cb797868547f40d162a,c42d6bbf8406cff0b6cab2554,ca900b535b5e949b19c8504f9,true,Lets go of the wheel.,"Relieved, parked first time.",2
+c7e11df41022a402af8799994,cc2a074609c7e1e3acbb322ec,ca900b535b5e949b19c8504f9,true,Walks away.,Likes knowing the car is locked without checking.,2
+cac1c57703dcb8241e7f71f9e,ccdd8e505c8dfb9b8a8ba7ab2,c0e9ee1f464e55f6e033d37db,true,Asks if they are there yet.,Bored after two hours.,-2
+c638b4c4d41ad47f637c9b373,ccdd8e505c8dfb9b8a8ba7ab2,c43e641888c06064b6600439d,true,Looks for the charger cable.,Wants the stop to be quick and simple.,0
+ccf6b45f330ad84f702c9b6b4,ccdd8e505c8dfb9b8a8ba7ab2,ca900b535b5e949b19c8504f9,true,Parks.,Worried about how long the stop will take.,-1
+c492f6a72bd3a84e0d7ff8faa,c247edab496ee252de85db714,c0e9ee1f464e55f6e033d37db,true,Watches the logo pulse.,Finds the lights fun.,0
+c641aed7381dd8b600a12906b,c247edab496ee252de85db714,c43e641888c06064b6600439d,true,Checks remaining time on his phone.,Wants a reliable time to plan the stop.,1
+cf1b27588d44b1961fcd37337,c247edab496ee252de85db714,ca900b535b5e949b19c8504f9,true,Reads the estimated time on the screen.,Relieved to have a clear time.,1
+c0c33477ba5d5b0409edc4dd2,c30f046f42d5e6bc97346c4b3,c0e9ee1f464e55f6e033d37db,true,Waits for her seat to move.,Excited.,2
+c7f899c425b2491373ba91dc3,c30f046f42d5e6bc97346c4b3,c43e641888c06064b6600439d,true,Taps Lounge.,Not sure the car may move seats while charging.,0
+c0764cd403c1380d2f3639c17,c30f046f42d5e6bc97346c4b3,ca900b535b5e949b19c8504f9,true,Lets go of the wheel.,Wants to be sure nothing moves while someone is in the way.,0
+c7daf5fc75292a2d423a3d68c,c656e98b37141edacd3417755,c0e9ee1f464e55f6e033d37db,true,Stays seated while her seat turns.,"Finds it fun, wants to do it again.",3
+caf118138fc0b266c31ffbc47,c656e98b37141edacd3417755,c43e641888c06064b6600439d,true,Watches the seats turn.,Reassured the car checked the area first.,1
+cced4b406a98c4d9a577eddd4,c656e98b37141edacd3417755,ca900b535b5e949b19c8504f9,true,Turns to face the back.,Can finally see the kids while talking.,2
+c491fdb4f4adaa175f22fbcc4,c01930849c496cb9f4ca62681,c0e9ee1f464e55f6e033d37db,true,Starts a game.,The stop is now the fun part.,3
+cd70176424b304dd29c2be1da,c01930849c496cb9f4ca62681,c43e641888c06064b6600439d,true,Opens his laptop on the console.,Useful place to answer two emails.,2
+ce502b1216c3d21c4d4ca50c2,c01930849c496cb9f4ca62681,ca900b535b5e949b19c8504f9,true,Takes a cold drink.,Finally a real break.,3
+c0593bace6c818487dc0a0002,c8ae72e72ed74cbff3bc6adda,c0e9ee1f464e55f6e033d37db,true,Asks for five more minutes.,Wants to finish her game.,-1
+cdbfbc595305ac45273d0f47e,c8ae72e72ed74cbff3bc6adda,c43e641888c06064b6600439d,true,Closes his laptop.,Likes knowing exactly when to leave.,1
+c9e46a00341d8fcfdfb563dfa,c8ae72e72ed74cbff3bc6adda,ca900b535b5e949b19c8504f9,true,Reads the notification.,Doesn't want to rush the kids.,1
+c9dfc75506f063bb5b958a7b0,c53034a442cbba67483111b90,c0e9ee1f464e55f6e033d37db,true,Turns back to face the road.,A bit sad the lounge is over.,0
+ce10de69ecae035cf4f9f5a13,c53034a442cbba67483111b90,c43e641888c06064b6600439d,true,Puts his laptop away.,Easy to get going again.,1
+c966026a167bd94678749346e,c53034a442cbba67483111b90,ca900b535b5e949b19c8504f9,true,Watches the cabin reset.,Trusts it more after it checked the cable.,2

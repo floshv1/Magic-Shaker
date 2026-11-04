@@ -1,0 +1,20 @@
+﻿key,value
+schema_version,1.0
+exported_at,2026-11-04T09:29:15Z
+company_name,ESILV
+project_id,c256a10fb412a9dcf6c259dea
+project_name,Renault E-Space concept
+count_use_cases,4
+count_step_groups,10
+count_steps,24
+count_step_triggers,29
+count_personas,4
+count_use_case_personas,9
+count_persona_step_feedback,54
+count_components,20
+count_component_states,72
+count_use_case_components,44
+count_step_component_states,279
+count_step_unused_components,0
+count_user_needs,10
+count_step_user_needs,27

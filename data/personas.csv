@@ -1,0 +1,5 @@
+﻿persona_id,name,age_category,gender,biography,color,library_id,library_name,library_link_mode
+c141266c3c58944faf796e515,Jacques Martin,senior,male,"Grandfather, 72, travels with the family on holidays. Needs easy boarding and a comfortable, calm seat.",#7B61FF,,,
+ca900b535b5e949b19c8504f9,Camille Martin,active_adult,female,Driver and mother of two. Drives the family on weekends and holidays. Wants the car to handle the logistics so she can stay focused on the road.,#FF5733,,,
+c0e9ee1f464e55f6e033d37db,Léa Martin,child,female,"11 years old, sits in the second row. Gets bored after 30 minutes. Loves games and her own music.",#3FB68F,,,
+c43e641888c06064b6600439d,Hugo Bernard,active_adult,male,"Camille's partner, works remotely. Uses long stops to rest or answer a few emails. Front passenger.",#4C6FFF,,,

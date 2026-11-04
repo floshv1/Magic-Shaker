@@ -1,0 +1,11 @@
+﻿group_id,use_case_id,position,name,color
+c1a0f7e02466aa0f58eac3182,c332fdf81ef4364da159b19bd,1,Approach,#4C6FFF
+c070d036eb07da6c144487d7d,c332fdf81ef4364da159b19bd,2,Boarding,#3FB68F
+cb5834520811169fccc21417f,c332fdf81ef4364da159b19bd,3,Departure,#E8A94D
+c06a5ecac8187049894c3423a,c918eb279b08cd0ded2fe9cad,1,On the road,#4C6FFF
+cd839f43317c0c6a9f35d6e4e,c2ba95ecb78d6ce29927af8ec,1,City,#4C6FFF
+c6d859b39c57d9d1ace4ba255,c2ba95ecb78d6ce29927af8ec,2,Parking,#3FB68F
+c5f22107a73dda080be7c2dfb,c2ba95ecb78d6ce29927af8ec,3,Leaving the car,#E8A94D
+c45949333cbced627f1718f67,c628df31e4af6e1e578116ac4,1,Charging,#4C6FFF
+c60a3400e74ccdff68c07af51,c628df31e4af6e1e578116ac4,2,MVP · Lounge,#3FB68F
+c44cc74c0aafb75e1733c567c,c628df31e4af6e1e578116ac4,3,V2 · Smart exit,#E8A94D
