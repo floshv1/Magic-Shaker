@@ -39,6 +39,7 @@ class Diagram:
     dot: str
     nodes: int
     edges: int
+    transitions: int = 0      # machines à états seulement
 
 
 @dataclass
@@ -69,8 +70,8 @@ class _Dot:
         self.lines = [
             f'{"digraph" if directed else "graph"} "{name}" {{',
             f'  graph [rankdir={rankdir}, bgcolor="white", fontname="{FONT}", fontsize=11, '
-            'nodesep=0.35, ranksep=0.45, compound=true];',
-            f'  node [fontname="{FONT}", fontsize=11, style="filled", margin="0.15,0.06"];',
+            'nodesep=0.4, ranksep=0.5, splines=ortho, forcelabels=true, pad=0.2];',
+            f'  node [fontname="{FONT}", fontsize=11, shape=box, style="filled", margin="0.18,0.07", penwidth=1.2];',
             f'  edge [fontname="{FONT}", fontsize=9, color="#555555", fontcolor="#333333"];',
         ]
         self.nodes = 0
@@ -88,6 +89,8 @@ class _Dot:
 
     def edge(self, a: str, b: str, **attrs: str) -> None:
         op = "->" if self.directed else "--"
+        if "label" in attrs:               # traits orthogonaux : étiquettes externes (xlabel)
+            attrs["xlabel"] = attrs.pop("label")
         body = ", ".join(f"{k}={v}" for k, v in attrs.items())
         self.lines.append(f'{self.indent}"{a}" {op} "{b}"' + (f" [{body}]" if body else "") + ";")
         self.edges += 1
@@ -96,7 +99,7 @@ class _Dot:
         fill, line = COLORS[kind]
         self.lines.append(f'{self.indent}subgraph "cluster_{cid}" {{')
         self.indent += "  "
-        self.lines.append(f'{self.indent}label={label}; style="rounded,filled"; fillcolor="{fill}"; '
+        self.lines.append(f'{self.indent}label={label}; labeljust=l; style="filled"; fillcolor="{fill}"; '
                           f'color="{line}"; tooltip="{_tip(tooltip)}";')
 
     def close_cluster(self) -> None:
@@ -115,6 +118,11 @@ def _ref(doc: str, uid: str) -> str:
     return f"{doc} [UserShakerRef id = {uid}]" if uid else doc
 
 
+def _part_label(part: str, typ: str) -> dict[str, str]:
+    """Nom de la part sur le lien de composition, seulement s'il apporte quelque chose (≠ type)."""
+    return {} if part.lower() == typ.lower() else {"label": f'"{_tip(part)}"'}
+
+
 # --------------------------------------------------------------------- vues
 
 def _structure(common: dict) -> Diagram:
@@ -128,10 +136,10 @@ def _structure(common: dict) -> Diagram:
             extra.append(f"exhibit state : {c['state_def']}")
         d.node(f"pd_{c['name']}", _label("part def", c["name"], extra), "part", _ref(c["doc"], c["id"]), shape="box")
     for part, typ in common["system_parts"]:
-        d.edge(f"pd_{system}", f"pd_{typ}", dir="back", arrowtail="diamond", label=f'"{_tip(part)}"')
+        d.edge(f"pd_{system}", f"pd_{typ}", dir="back", arrowtail="diamond", **_part_label(part, typ))
     for c in common["components"]:
         for part, typ in c["parts"]:
-            d.edge(f"pd_{c['name']}", f"pd_{typ}", dir="back", arrowtail="diamond", label=f'"{_tip(part)}"')
+            d.edge(f"pd_{c['name']}", f"pd_{typ}", dir="back", arrowtail="diamond", **_part_label(part, typ))
     return d.done(f"Structure : part def {system}")
 
 
@@ -147,7 +155,7 @@ def _use_cases(common: dict, ucs: list[dict], subject: str) -> Diagram:
     for p in used:
         info = personas.get(p, {"doc": p, "id": ""})
         d.node(f"act_{p}", _label("actor", p, [": Persona"]), "actor", _ref(info["doc"], info["id"]),
-               shape="box", style='"filled,rounded"')
+               shape="box", style='"filled"')
     d.open_cluster("subject", _label("part def", common["system"], [f"subject {subject}"]), "part",
                    f"Sujet des use cases : {subject} : {common['system']}")
     for u in ucs:
@@ -173,13 +181,13 @@ def _activity(u: dict, with_requirements: bool) -> Diagram:
         for s in steps:
             nid = f"a_{s['name']}"
             d.node(nid, _label("action", s["name"]), "action", _ref(s["doc"], s["id"]),
-                   shape="box", style='"filled,rounded"')
+                   shape="box", style='"filled"')
             order.append(nid)
         if item["kind"] == "phase":
             d.close_cluster()
     chain = ["start", *order, "done"]
     for a, b in zip(chain, chain[1:]):
-        d.edge(a, b, label='"then"' if a != "start" and b != "done" else '""')
+        d.edge(a, b, tooltip='"then"')
     if with_requirements:
         reqs: list[str] = []
         for dep in u["dependencies"]:
@@ -207,17 +215,23 @@ def _state_machine(sd, ids: dict[str, str]) -> Diagram:
     d.raw_node("init", 'shape=circle, style=filled, fillcolor="black", label="", width=0.2, tooltip="entry"')
     for s in sd.states:
         d.node(f"s_{s['name']}", _label("state", s["name"]), "state", _ref(s["doc"], s["id"]),
-               shape="box", style='"filled,rounded"')
-    d.edge("init", f"s_{sd.initial}", label='"entry"')
+               shape="box", style='"filled"')
+    d.edge("init", f"s_{sd.initial}", tooltip='"entry"')
     for t in sd.transitions:
-        parts = [t.name]
+        # étiquette = petit bloc posé sur le trait : reste lisible avec des traits orthogonaux
+        rows = [f"<B>{escape(t.name)}</B>"]
         if t.accept:
-            parts.append(f"accept {_short(t.accept)}")
+            rows.append(f"accept {escape(_short(t.accept))}")
         if t.guards:
-            parts.append(f"[{' and '.join(t.guards)}]")
-        label = "\\n".join(_tip(p) for p in parts)
-        d.edge(f"s_{t.source}", f"s_{t.target}", label=f'"{label}"', tooltip=f'"{_tip(_ref(t.doc, t.ref_id))}"')
-    return d.done(f"state def {sd.name} ({ids.get(sd.component_id, sd.component_id)})")
+            rows.append(f"[{escape(' and '.join(t.guards))}]")
+        tip = _tip(_ref(t.doc, t.ref_id))
+        d.raw_node(f"t_{t.name}", 'shape=box, style="filled", fillcolor="white", color="#BBBBBB", fontsize=9, '
+                                  f'margin="0.06,0.03", label=<{"<BR/>".join(rows)}>, tooltip="{tip}"')
+        d.edge(f"s_{t.source}", f"t_{t.name}", arrowhead="none", tooltip=f'"{tip}"')
+        d.edge(f"t_{t.name}", f"s_{t.target}", tooltip=f'"{tip}"')
+    out = d.done(f"state def {sd.name} ({ids.get(sd.component_id, sd.component_id)})")
+    out.transitions = len(sd.transitions)
+    return out
 
 
 def build_diagrams(ex: Export, selected: list[str] | None = None, cfg: GenerateSettings | None = None,

@@ -11,7 +11,20 @@ make install          # dépendances (uv) ; à relancer après un changement de 
 make demo             # ingest + generate + trace, puis lance l'interface (http://localhost:8501)
 ```
 
-Dans l'interface : déposer le `.zip` de l'export, ou activer « Utiliser l'export du dépôt ».
+L'interface est un parcours en trois étapes :
+
+1. **Importer** : déposer le `.zip` de l'export, ou cliquer sur « Utiliser l'export de démonstration » ;
+   le résumé de l'export et les contrôles s'affichent ;
+2. **Choisir** : cocher les use cases, puis cliquer sur « Traduire » (rien n'est généré avant) ;
+3. **Résultats** : bandeau de traçabilité, téléchargement du modèle, puis onglets Diagrammes,
+   Fichiers .sysml (couverture, matrice, parseur OMG), Points à valider et Assistant.
+
+Les diagrammes s'ouvrent dans une visionneuse (molette : zoom, glisser : déplacer, plein écran,
+nouvel onglet, export SVG). Tout est embarqué, aucun accès internet n'est nécessaire pendant la démo :
+
+- `app/assets/viz-global.js` : Viz.js 3.31 (licence MIT, contient Graphviz) ;
+- `app/static/fonts/` : IBM Plex Sans et Mono (licence OFL, voir `OFL.txt`) ;
+- `.streamlit/config.toml` : thème (couleurs, polices) ; `make demo` doit être lancé depuis la racine.
 
 ## Commandes
 

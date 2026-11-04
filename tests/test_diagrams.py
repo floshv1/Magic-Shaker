@@ -32,9 +32,10 @@ def test_noms_identiques_au_sysml(export) -> None:
     common = next(iter(gen.files.values()))
     for name, view in d.states.items():
         assert f"state def {name}" in common
-        for t in re.findall(r'label="(\w+)(?:\\n|")', view.dot):
-            if t != "entry":
-                assert re.search(rf"\btransition {t}\b", common), (name, t)
+        found = re.findall(r'^\s*"t_(\w+)" \[', view.dot, re.M)
+        assert len(found) == view.transitions
+        for t in found:
+            assert re.search(rf"\btransition {t}\b", common), (name, t)
 
 
 def test_steps_relies_dans_l_ordre_et_ids_en_survol(export) -> None:
@@ -58,4 +59,4 @@ def test_use_cases_et_structure(export) -> None:
     d = build_diagrams(export)
     assert d.use_cases.dot.count("«use case def»") == len(export.use_cases)
     assert d.structure.dot.count("«part def»") == len(export.components) + 1
-    assert sum(v.edges - 1 for v in d.states.values()) > 0      # transitions déduites
+    assert sum(v.transitions for v in d.states.values()) > 0      # transitions déduites
