@@ -167,6 +167,25 @@ def test_ajouter_une_garde_puis_annuler(app, export, tmp_path) -> None:
     assert load_review(tmp_path / "review" / "decisions.json").get(fid) is None
 
 
+def test_fichier_de_decisions_illisible_jamais_ecrase(app, export, tmp_path) -> None:
+    path = tmp_path / "review" / "decisions.json"
+    path.parent.mkdir(parents=True)
+    path.write_text('<<<<<<< HEAD\n{"decisions": []}\n=======\n{"decisions": []}\n>>>>>>> autre\n', encoding="utf-8")
+    before = path.read_bytes()
+    _open_review(app)
+    assert any("illisible" in e.value for e in app.error)
+    fid = _speed_finding_id(export)
+    assert app.button(key=f"rv_save_{fid}").disabled
+    # fichier abîmé pendant que la page est ouverte (git pull en conflit) : le clic n'écrit rien non plus
+    path.write_text('{"decisions": []}', encoding="utf-8")
+    app.text_input(key="rv_author").set_value("Testeur")
+    _ok(app.run())
+    path.write_bytes(before)
+    _ok(app.button(key=f"rv_save_{fid}").click().run())
+    assert path.read_bytes() == before
+    assert any("Décision non enregistrée" in e.value and "illisible" in e.value for e in app.error)
+
+
 def test_ecarter_exige_une_raison(app, export, tmp_path) -> None:
     from p9.review import load_review
     _open_review(app)

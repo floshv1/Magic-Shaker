@@ -6,10 +6,12 @@ import json
 
 import pytest
 
+from p9.checks import build_matrix
 from p9.generate import generate
 from p9.llm import (
     TOOLS,
     Proposal,
+    ProposalFileError,
     ProposalStore,
     ToolContext,
     ask,
@@ -122,6 +124,9 @@ def test_store_decisions(ctx, tmp_path) -> None:
     save_store(store, tmp_path / "p.json")
     again = load_store(tmp_path / "p.json")
     assert [q.status for q in again.proposals] == ["accepted"] and len(again.accepted()) == 1
+    (tmp_path / "p.json").write_text("{ pas du json", encoding="utf-8")     # illisible : jamais lu comme vide
+    with pytest.raises(ProposalFileError, match="illisible"):
+        load_store(tmp_path / "p.json")
 
 
 def test_rendu_propositions_acceptees_separees(ctx) -> None:
@@ -136,6 +141,10 @@ def test_rendu_propositions_acceptees_separees(ctx) -> None:
     assert "LlmOrigin" not in g.single_file              # jamais mélangé au modèle d'origine
     assert "LlmOrigin" not in g.files["ESpaceCommon.sysml"]
     assert {e.kind for e in g.trace if e.kind == "llm_proposal"} == {"llm_proposal"}
+    # chaque proposition acceptée a sa ligne dans la matrice de traçabilité, avec son origine
+    rows = [e for e in build_matrix(ctx.export, g) if e.kind == "llm_proposal"]
+    assert sorted(e.usershaker_id for e in rows) == sorted(p.proposal_id for p in accepted)
+    assert all("origin=llm" in e.reason and e.file == "ESpaceConceptLlmProposals.sysml" for e in rows)
 
 
 # ------------------------------------------------------------ outils ajoutés, relance, mesure

@@ -186,13 +186,24 @@ class ProposalStore(BaseModel):
         return [p for p in self.proposals if p.status == "accepted"]
 
 
+class ProposalFileError(ValueError):
+    """Fichier de propositions présent mais illisible : on refuse de l'écraser (décisions accepted / rejected)."""
+
+
 def load_store(path: Path) -> ProposalStore:
+    """Store vide si le fichier n'existe pas encore ; un fichier illisible lève ProposalFileError."""
     if not path.is_file():
         return ProposalStore()
     try:
         return ProposalStore.model_validate_json(path.read_text(encoding="utf-8"))
-    except ValidationError:
-        return ProposalStore()
+    except ValidationError as e:
+        err = e.errors()[0]
+        where = ".".join(map(str, err["loc"]))
+        detail = f"{where} : {err['msg']}" if where else err["msg"]
+    except (OSError, ValueError) as e:
+        detail = str(e)
+    raise ProposalFileError(f"{path} illisible ({detail}). Corrigez ou supprimez le fichier : aucune proposition "
+                            "n'est appliquee ni enregistree tant qu'il est illisible.")
 
 
 def save_store(store: ProposalStore, path: Path) -> None:

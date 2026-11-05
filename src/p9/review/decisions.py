@@ -108,13 +108,25 @@ class ReviewStore(BaseModel):
         self.decisions = [x for x in self.decisions if x.finding_id != fid]
 
 
+class ReviewFileError(ValueError):
+    """Fichier de décisions présent mais illisible (conflit git, JSON invalide) : on refuse de l'écraser."""
+
+
 def load_review(path: Path | None) -> ReviewStore:
+    """Store vide si le fichier n'existe pas encore. Un fichier illisible lève ReviewFileError : renvoyer un
+    store vide ferait disparaître les décisions de l'équipe au prochain enregistrement."""
     if path is None or not path.is_file():
         return ReviewStore()
     try:
         return ReviewStore.model_validate_json(path.read_text(encoding="utf-8"))
-    except (ValidationError, OSError, ValueError):
-        return ReviewStore()
+    except ValidationError as e:
+        err = e.errors()[0]
+        where = ".".join(map(str, err["loc"]))
+        detail = f"{where} : {err['msg']}" if where else err["msg"]
+    except (OSError, ValueError) as e:
+        detail = str(e)
+    raise ReviewFileError(f"{path} illisible ({detail}). Corrigez le fichier (conflit git ?) : aucune decision "
+                          "n'est appliquee ni enregistree tant qu'il est illisible.")
 
 
 def save_review(store: ReviewStore, path: Path) -> None:

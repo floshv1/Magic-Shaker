@@ -97,7 +97,8 @@ def test_couverture_jamais_100_si_incomplet(export, gen, matrix) -> None:
     assert cov["Steps"].percent == 100
     trig = cov["Triggers / conditions"]
     assert trig.in_export == 29 and trig.translated == 25 and trig.percent == 86
-    assert cov["Contraintes en texte libre"].percent == 0
+    text = cov["Contraintes en texte libre"]
+    assert text.percent == 0 and text.partial == 2 and "a modeliser" in text.note
 
 
 def test_rapport_html(export, gen, matrix, findings) -> None:

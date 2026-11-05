@@ -3,6 +3,8 @@
 Principe : on part de l'inventaire de TOUTES les lignes de l'export (une ligne par id, ou par
 clé composite pour les feuilles de liens) et on y rattache ce que le générateur a produit.
 Ce qui n'a pas été produit apparaît `not_mapped` avec une raison : rien ne disparaît en silence.
+Ce que le modèle contient en plus de l'export (décisions humaines, propositions LLM acceptées) y figure
+aussi, avec son origine : chaque élément du modèle a sa ligne.
 """
 
 from __future__ import annotations
@@ -25,7 +27,9 @@ KIND_OF_SHEET = {
     "step_component_states": "step_component_state", "step_unused_components": "step_unused_component",
     "user_needs": "user_need", "step_user_needs": "step_user_need",
 }
-KIND_ORDER = ["project", *KIND_OF_SHEET.values(), "text_constraint"]
+# Éléments ajoutés hors export, dans des packages séparés : décisions humaines et propositions LLM acceptées.
+ADDED_KINDS = ("review_decision", "llm_proposal")
+KIND_ORDER = ["project", *KIND_OF_SHEET.values(), "text_constraint", *ADDED_KINDS]
 COLUMNS = ["usershaker_id", "kind", "sysml_qualified_name", "status", "reason", "file"]
 
 
@@ -92,6 +96,8 @@ def build_matrix(ex: Export, gen: Generated, findings: list[Finding] | None = No
                 "status": "mapped",
                 "reason": f"ecarte par {d.author} le {d.decided_at} : {d.reason.strip()} ({sentence})"})
         out.append(entry)
+    # Éléments ajoutés au modèle hors export (origin = human / llm), avec auteur, date ou proposition.
+    out.extend(e for (kind, _), e in produced.items() if kind in ADDED_KINDS)
     order = {k: i for i, k in enumerate(KIND_ORDER)}
     return sorted(out, key=lambda e: (order.get(e.kind, 99), e.usershaker_id))
 
@@ -172,8 +178,15 @@ def coverage(ex: Export, gen: Generated, matrix: list[TraceEntry]) -> list[Cover
         row("Feedback personas", "persona_step_feedback", sorted(f.feedback_id for f in feedback)),
     ]
     if text_constraints:
-        rows.append(CoverageRow(
-            element="Contraintes en texte libre", in_export=len(text_constraints), translated=0,
-            partial=len(text_constraints),
-            note="conservees en commentaire, sans condition structuree : a modeliser (voir Points a valider)"))
+        # statuts de la matrice : `mapped` une fois traitée par une décision humaine (garde ajoutée, point écarté)
+        mapped = sum(1 for e in text_constraints if e.status == "mapped")
+        partial = sum(1 for e in text_constraints if e.status == "partial")
+        notes = []
+        if partial:
+            notes.append(f"{partial} conservee(s) en commentaire, sans condition structuree : a modeliser "
+                         "(voir Points a valider)")
+        if mapped:
+            notes.append(f"{mapped} traitee(s) par une decision humaine (garde ajoutee ou point ecarte)")
+        rows.append(CoverageRow(element="Contraintes en texte libre", in_export=len(text_constraints),
+                                translated=mapped, partial=partial, note=" | ".join(notes)))
     return rows

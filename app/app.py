@@ -22,7 +22,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from p9.checks import CHECK_RULES, build_matrix, coverage, matrix_csv, run_all
+from p9.checks import ADDED_KINDS, CHECK_RULES, build_matrix, coverage, matrix_csv, run_all
 from p9.checks import sysml_parser
 from p9.config import load_settings
 from p9.progress import estimate, record
@@ -30,6 +30,7 @@ from p9.review import (
     ACTION_LABELS,
     ACTIONS_BY_CHECK,
     Decision,
+    ReviewFileError,
     ReviewStore,
     decision_errors,
     load_review,
@@ -41,6 +42,7 @@ from p9.generate import Diagram, build_diagrams, generate, generate_catia, make_
 from p9.ingest import REQUIRED_SHEETS, Export, ExportUnreadable, load_dir, load_zip, use_case_summaries
 from p9.llm import (
     LlmUnavailable,
+    ProposalFileError,
     ProposalStore,
     ToolContext,
     ask,
@@ -539,13 +541,17 @@ def _findings_block(title: str, check: str, empty: str, why: str = "") -> None:
 
 
 def _decide(pid: str, status: str) -> None:
-    s = load_store(PROPOSALS_PATH)
+    try:
+        s = load_store(PROPOSALS_PATH)
+    except ProposalFileError:
+        return          # fichier illisible : rien n'est écrasé, le bandeau d'erreur l'explique
     s.decide(pid, status)  # type: ignore[arg-type]
     save_store(s, PROPOSALS_PATH)
 
 
 def _ledger(matrix) -> None:
-    counts = {s: sum(1 for e in matrix if e.status == s) for s in ("mapped", "partial", "not_mapped")}
+    rows = [e for e in matrix if e.kind not in ADDED_KINDS]     # éléments de l'export (sans décisions ni LLM)
+    counts = {s: sum(1 for e in rows if e.status == s) for s in ("mapped", "partial", "not_mapped")}
     total = sum(counts.values())
     lost = counts["not_mapped"]
     if lost:
@@ -600,7 +606,10 @@ def _save_decision(d: Decision) -> None:
 
 
 def _undo_decision(fid: str) -> None:
-    rs = load_review(SETTINGS.review_file)
+    try:
+        rs = load_review(SETTINGS.review_file)
+    except ReviewFileError:
+        return          # fichier illisible : rien n'est écrasé, le bandeau d'erreur l'explique
     rs.remove(fid)
     save_review(rs, SETTINGS.review_file)
     st.session_state.pop(f"rv_edit_{fid}", None)
@@ -701,7 +710,7 @@ def _review_form(item) -> None:
     if err:
         st.error(err)
     st.button("Enregistrer la décision", key=f"rv_save_{fid}", type="primary", on_click=_submit_decision,
-              args=(f, fid, action, fields))
+              args=(f, fid, action, fields), disabled=bool(review_error))
 
 
 def _submit_decision(f, fid: str, action: str, fields: dict) -> None:
@@ -724,7 +733,11 @@ def _submit_decision(f, fid: str, action: str, fields: dict) -> None:
     if errors:
         st.session_state[f"rv_err_{fid}"] = "Décision non enregistrée : " + " ; ".join(errors) + "."
         return
-    _save_decision(dec)
+    try:
+        _save_decision(dec)
+    except ReviewFileError as e:
+        st.session_state[f"rv_err_{fid}"] = f"Décision non enregistrée : {e}"
+        return
     st.session_state.pop(f"rv_edit_{fid}", None)
 
 
@@ -762,9 +775,16 @@ def _review_card(item) -> None:
 
 if step == 3:
     with st.container(key="stepbody_3"):   # nouveau bloc à chaque étape : rien ne reste de la précédente
-        store = load_store(PROPOSALS_PATH)
+        # Fichier illisible : on continue sans son contenu, on le signale, et rien n'y est écrit (pas d'écrasement).
+        try:
+            store, store_error = load_store(PROPOSALS_PATH), ""
+        except ProposalFileError as e:
+            store, store_error = ProposalStore(), str(e)
         accepted = ProposalStore(proposals=store.accepted())
-        review = load_review(SETTINGS.review_file)
+        try:
+            review, review_error = load_review(SETTINGS.review_file), ""
+        except ReviewFileError as e:
+            review, review_error = ReviewStore(), str(e)
         review_json = review.model_dump_json()
         gen, matrix, cov, trace_csv = cached_generate(
             f"{export_key}|{'|'.join(translated)}|{hashlib.sha256(review_json.encode()).hexdigest()}", ex, translated,
@@ -793,6 +813,9 @@ if step == 3:
                                      "un fichier autonome par use case pour CATIA Community")
         if translated != selected:
             st.info("La sélection a changé depuis cette traduction. Revenez à l'étape Choisir pour traduire à nouveau.")
+        for err in (review_error, store_error):
+            if err:
+                st.error(err)
         _ledger(matrix)
 
         # libellés fixes : un libellé qui change (compteur) ferait perdre l'onglet ouvert à Streamlit
@@ -935,7 +958,7 @@ if step == 3:
                 llm_ok, llm_label = provider_status(SETTINGS.llm)
                 st.markdown(f"Fournisseur : **{llm_label}**" if llm_ok else f"⚠️ {llm_label}")
 
-                if st.button("Générer des propositions", disabled=not llm_ok):
+                if st.button("Générer des propositions", disabled=not llm_ok or bool(store_error)):
                     try:
                         provider, tctx = make_provider(SETTINGS.llm), cached_tool_context(export_key, ex)
                         res = run_live("Le LLM analyse les points à valider", llm_key("enrich"),
