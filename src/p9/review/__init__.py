@@ -5,6 +5,7 @@ from .decisions import (
     ACTIONS_BY_CHECK,
     REVIEW_CHECKS,
     Decision,
+    ReviewFileError,
     ReviewItem,
     ReviewState,
     ReviewStore,
@@ -17,6 +18,7 @@ from .decisions import (
 )
 
 __all__ = [
-    "ACTIONS_BY_CHECK", "ACTION_LABELS", "Decision", "REVIEW_CHECKS", "ReviewItem", "ReviewState", "ReviewStore",
+    "ACTIONS_BY_CHECK", "ACTION_LABELS", "Decision", "REVIEW_CHECKS", "ReviewFileError", "ReviewItem",
+    "ReviewState", "ReviewStore",
     "decision_errors", "finding_id", "load_review", "review_csv", "review_state", "save_review",
 ]

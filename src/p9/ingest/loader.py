@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import zipfile
+import zlib
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from pathlib import Path
@@ -179,8 +180,10 @@ def _iter_zip(data: bytes) -> Iterable[tuple[str, bytes]]:
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             return [(i.filename, z.read(i)) for i in z.infolist() if not i.is_dir()]
-    except (zipfile.BadZipFile, OSError, EOFError) as e:
+    except (zipfile.BadZipFile, OSError, EOFError, zlib.error) as e:
         raise ExportUnreadable(f"zip illisible : {e}") from e
+    except RuntimeError as e:     # chiffré (mot de passe) ou compression non gérée (NotImplementedError)
+        raise ExportUnreadable(f"zip illisible : {e} (reexporter en zip standard, sans mot de passe)") from e
 
 
 def _iter_dir(path: Path) -> Iterable[tuple[str, bytes]]:

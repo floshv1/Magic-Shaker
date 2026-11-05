@@ -14,6 +14,7 @@ APP = str(Path(__file__).parents[1] / "app" / "app.py")
 def app(monkeypatch, tmp_path) -> AppTest:
     monkeypatch.setenv("P9_OUT_DIR", str(tmp_path))          # pas d'écriture dans out/
     monkeypatch.setenv("P9_REVIEW_FILE", str(tmp_path / "review" / "decisions.json"))   # ni dans review/
+    monkeypatch.setenv("P9_PROPOSALS_FILE", str(tmp_path / "review" / "llm_proposals.json"))
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("P9_LLM_PROVIDER", "anthropic")
     at = AppTest.from_file(APP, default_timeout=120)
@@ -165,6 +166,38 @@ def test_ajouter_une_garde_puis_annuler(app, export, tmp_path) -> None:
     _ok(app.run())
     _ok(app.button(key=f"rv_undo_{fid}").click().run())
     assert load_review(tmp_path / "review" / "decisions.json").get(fid) is None
+
+
+def test_fichier_de_decisions_illisible_jamais_ecrase(app, export, tmp_path) -> None:
+    path = tmp_path / "review" / "decisions.json"
+    path.parent.mkdir(parents=True)
+    path.write_text('<<<<<<< HEAD\n{"decisions": []}\n=======\n{"decisions": []}\n>>>>>>> autre\n', encoding="utf-8")
+    before = path.read_bytes()
+    _open_review(app)
+    assert any("illisible" in e.value for e in app.error)
+    fid = _speed_finding_id(export)
+    assert app.button(key=f"rv_save_{fid}").disabled
+    # fichier abîmé pendant que la page est ouverte (git pull en conflit) : le clic n'écrit rien non plus
+    path.write_text('{"decisions": []}', encoding="utf-8")
+    app.text_input(key="rv_author").set_value("Testeur")
+    _ok(app.run())
+    path.write_bytes(before)
+    _ok(app.button(key=f"rv_save_{fid}").click().run())
+    assert path.read_bytes() == before
+    assert any("Décision non enregistrée" in e.value and "illisible" in e.value for e in app.error)
+
+
+def test_proposition_llm_affichee_sans_image(app, export, tmp_path) -> None:
+    """Une image markdown dans un texte du LLM ferait charger une URL choisie par le modèle : elle est neutralisée."""
+    from p9.llm import Proposal, ProposalStore, save_store
+    step = next(s for s in export.steps if s.name == "Parking ratio")
+    p = Proposal(kind="guard", title="Vitesse sous 10 km/h", text="Voir ![x](http://example.invalid/p.png) ici.",
+                 rationale="trigger_text", target_ids=[step.step_id], proposal_id="abc123def456")
+    save_store(ProposalStore(proposals=[p]), tmp_path / "review" / "llm_proposals.json")
+    _open_review(app)
+    md = _md(app)
+    assert "Voir !\\[x](http://example.invalid/p.png) ici." in md     # liste des propositions + carte du point
+    assert "![x](" not in md
 
 
 def test_ecarter_exige_une_raison(app, export, tmp_path) -> None:

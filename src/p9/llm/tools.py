@@ -37,9 +37,12 @@ def _findings(items: list[Finding]) -> list[dict[str, Any]]:
 
 @dataclass
 class ToolContext:
-    """État partagé par les outils (calculé une fois par export)."""
+    """État partagé par les outils (calculé une fois par export et par état de la revue)."""
 
     export: Export
+    # décisions humaines et propositions LLM acceptées : l'agent voit la traçabilité du modèle courant
+    review_decisions: list[Any] = field(default_factory=list)
+    accepted_proposals: list[Any] = field(default_factory=list)
     graph: nx.MultiDiGraph = field(init=False)
     generated: Generated = field(init=False)
     findings: dict[str, list[Finding]] = field(init=False)
@@ -47,9 +50,11 @@ class ToolContext:
 
     def __post_init__(self) -> None:
         self.graph = build_graph(self.export)
-        self.generated = generate(self.export)
+        self.generated = generate(self.export, accepted_proposals=self.accepted_proposals,
+                                  review_decisions=self.review_decisions)
         self.findings = run_all(self.export)
-        matrix = build_matrix(self.export, self.generated, self.findings["constraints_in_text_only"])
+        matrix = build_matrix(self.export, self.generated, self.findings["constraints_in_text_only"],
+                              self.review_decisions)
         self.trace = {}
         for e in matrix:
             self.trace.setdefault(e.usershaker_id, []).append(e)

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 import time
 from collections.abc import Callable
@@ -162,14 +163,30 @@ class AnthropicProvider:
 
 # =========================================================================== Ollama
 
+def ollama_base_url(host: str) -> str:
+    """URL de l'API à partir de OLLAMA_HOST, qui suit aussi le format du serveur Ollama (« 0.0.0.0 »,
+    « 127.0.0.1:11434 ») : sans schéma, http et le port 11434 sont ajoutés comme le fait Ollama. 0.0.0.0 (écoute
+    sur toutes les interfaces, côté serveur) devient 127.0.0.1 : on ne peut pas s'y connecter sous Windows."""
+    url = host.strip().rstrip("/")
+    if "://" not in url:
+        url = "http://" + url
+        try:
+            if urllib.parse.urlsplit(url).port is None:
+                url += ":11434"
+        except ValueError:                 # port illisible : l'erreur viendra à la connexion, avec l'adresse
+            pass
+    return url.replace("://0.0.0.0", "://127.0.0.1", 1)
+
+
 class OllamaProvider:
     """Ollama local (aucune donnée ne quitte la machine). API HTTP /api/chat avec outils."""
 
     name = "ollama"
     RETRIES = 2              # nouveaux essais sur erreur serveur passagère (modèles cloud surtout)
+    TIMEOUT = 300            # secondes sans aucune donnée reçue
 
     def __init__(self, cfg: LlmSettings) -> None:
-        self.host = cfg.ollama_host.rstrip("/")
+        self.host = ollama_base_url(cfg.ollama_host)
         self.model = cfg.ollama_model
 
     def _post(self, payload: dict[str, Any], on_event: OnEvent | None = None) -> dict[str, Any]:
@@ -189,8 +206,6 @@ class OllamaProvider:
 
         Le streaming sert à suivre la génération : tokens de réflexion, puis tokens de réponse."""
         payload = {**payload, "stream": True}
-        req = urllib.request.Request(f"{self.host}/api/chat", data=json.dumps(payload).encode("utf-8"),
-                                     headers={"Content-Type": "application/json"})
         content: list[str] = []
         thinking: list[str] = []
         tool_calls: list[dict[str, Any]] = []
@@ -198,7 +213,9 @@ class OllamaProvider:
         last = 0.0
         final: dict[str, Any] = {}
         try:
-            with urllib.request.urlopen(req, timeout=300) as r:  # noqa: S310 (hôte configuré)
+            req = urllib.request.Request(f"{self.host}/api/chat", data=json.dumps(payload).encode("utf-8"),
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=self.TIMEOUT) as r:  # noqa: S310 (hôte configuré)
                 for raw in r:
                     if not raw.strip():
                         continue
@@ -233,8 +250,14 @@ class OllamaProvider:
         except urllib.error.HTTPError as e:
             err = f"Ollama : erreur {e.code} ({e.read().decode('utf-8', 'replace')[:200]})"
             raise (_Transient if e.code >= 500 or e.code == 429 else LlmUnavailable)(err) from e
-        except (urllib.error.URLError, OSError) as e:
+        except (TimeoutError, urllib.error.URLError, OSError) as e:
+            if isinstance(e, TimeoutError) or isinstance(getattr(e, "reason", None), TimeoutError):
+                # serveur joignable mais muet : « lancer ollama serve » serait trompeur, et relancer coûterait 5 min
+                raise LlmUnavailable(f"Ollama ({self.model}) n'a rien envoye pendant {self.TIMEOUT} s : modele trop "
+                                     "lent ou surcharge, reessayer ou choisir un modele plus leger") from e
             raise LlmUnavailable(f"Ollama injoignable sur {self.host} (lancer `ollama serve`)") from e
+        except ValueError as e:            # adresse ou flux de réponse illisible (JSON invalide)
+            raise LlmUnavailable(f"Ollama : reponse ou adresse invalide sur {self.host} ({e})") from e
 
     def chat_with_tools(self, system: str, question: str, history: list[dict[str, Any]],
                         ctx: ToolContext, on_event: OnEvent | None = None) -> ChatResult:
@@ -292,8 +315,8 @@ def provider_status(cfg: LlmSettings) -> tuple[bool, str]:
             False, "API Claude : definir ANTHROPIC_API_KEY dans .env, ou P9_LLM_PROVIDER=ollama pour le mode local")
     if cfg.provider == "ollama":
         try:
-            with urllib.request.urlopen(f"{cfg.ollama_host.rstrip('/')}/api/tags", timeout=2):  # noqa: S310
+            with urllib.request.urlopen(f"{ollama_base_url(cfg.ollama_host)}/api/tags", timeout=2):  # noqa: S310
                 return True, f"Ollama local ({cfg.ollama_model})"
-        except (urllib.error.URLError, OSError):
-            return False, f"Ollama injoignable sur {cfg.ollama_host}"
+        except (urllib.error.URLError, OSError, ValueError):
+            return False, f"Ollama injoignable sur {ollama_base_url(cfg.ollama_host)}"
     return False, f"fournisseur inconnu : {cfg.provider}"

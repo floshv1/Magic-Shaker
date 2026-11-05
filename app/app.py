@@ -22,7 +22,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from p9.checks import CHECK_RULES, build_matrix, coverage, matrix_csv, run_all
+from p9.checks import ADDED_KINDS, CHECK_RULES, build_matrix, coverage, matrix_csv, run_all
 from p9.checks import sysml_parser
 from p9.config import load_settings
 from p9.progress import estimate, record
@@ -30,6 +30,7 @@ from p9.review import (
     ACTION_LABELS,
     ACTIONS_BY_CHECK,
     Decision,
+    ReviewFileError,
     ReviewStore,
     decision_errors,
     load_review,
@@ -41,6 +42,7 @@ from p9.generate import Diagram, build_diagrams, generate, generate_catia, make_
 from p9.ingest import REQUIRED_SHEETS, Export, ExportUnreadable, load_dir, load_zip, use_case_summaries
 from p9.llm import (
     LlmUnavailable,
+    ProposalFileError,
     ProposalStore,
     ToolContext,
     ask,
@@ -49,11 +51,13 @@ from p9.llm import (
     make_provider,
     provider_status,
     save_store,
+    store_path,
 )
 
 APP_DIR = Path(__file__).resolve().parent
 SETTINGS = load_settings(APP_DIR)
-PROPOSALS_PATH = SETTINGS.out_dir / "proposals.json"
+# propositions LLM : écrites dans le fichier versionné, lues via store_path (repli sur l'ancien out/proposals.json)
+PROPOSALS_PATH = SETTINGS.proposals_file or SETTINGS.out_dir / "proposals.json"
 STEPS = ["Importer", "Choisir", "Résultats"]
 RESULT_TABS = ["Diagrammes", "Fichiers .sysml", "Points à valider", "Assistant"]
 
@@ -196,8 +200,9 @@ def cached_diagrams(key: str, _ex: Export, selected: tuple[str, ...], with_requi
 
 
 @st.cache_resource(show_spinner="Préparation des outils de l'agent…")
-def cached_tool_context(key: str, _ex: Export) -> ToolContext:
-    return ToolContext(_ex)
+def cached_tool_context(key: str, _ex: Export, accepted_json: str, review_json: str) -> ToolContext:
+    return ToolContext(_ex, review_decisions=ReviewStore.model_validate_json(review_json).decisions,
+                       accepted_proposals=ProposalStore.model_validate_json(accepted_json).proposals)
 
 
 @st.cache_resource(show_spinner=False)
@@ -210,6 +215,12 @@ def viewer_assets() -> tuple[str, str]:
 
 def html(text: str) -> None:
     st.markdown(text, unsafe_allow_html=True)
+
+
+def llm_md(text: str) -> str:
+    """Texte écrit par le LLM, affiché sans image : une image markdown ferait charger une URL choisie par le modèle
+    (fuite possible si un texte de l'export lui dictait des instructions). Le texte reste lisible tel quel."""
+    return str(text).replace("![", "!\\[")
 
 
 def badges(*texts: str) -> str:
@@ -539,13 +550,17 @@ def _findings_block(title: str, check: str, empty: str, why: str = "") -> None:
 
 
 def _decide(pid: str, status: str) -> None:
-    s = load_store(PROPOSALS_PATH)
+    try:
+        s = load_store(store_path(PROPOSALS_PATH, SETTINGS.out_dir))
+    except ProposalFileError:
+        return          # fichier illisible : rien n'est écrasé, le bandeau d'erreur l'explique
     s.decide(pid, status)  # type: ignore[arg-type]
     save_store(s, PROPOSALS_PATH)
 
 
 def _ledger(matrix) -> None:
-    counts = {s: sum(1 for e in matrix if e.status == s) for s in ("mapped", "partial", "not_mapped")}
+    rows = [e for e in matrix if e.kind not in ADDED_KINDS]     # éléments de l'export (sans décisions ni LLM)
+    counts = {s: sum(1 for e in rows if e.status == s) for s in ("mapped", "partial", "not_mapped")}
     total = sum(counts.values())
     lost = counts["not_mapped"]
     if lost:
@@ -600,7 +615,10 @@ def _save_decision(d: Decision) -> None:
 
 
 def _undo_decision(fid: str) -> None:
-    rs = load_review(SETTINGS.review_file)
+    try:
+        rs = load_review(SETTINGS.review_file)
+    except ReviewFileError:
+        return          # fichier illisible : rien n'est écrasé, le bandeau d'erreur l'explique
     rs.remove(fid)
     save_review(rs, SETTINGS.review_file)
     st.session_state.pop(f"rv_edit_{fid}", None)
@@ -701,7 +719,7 @@ def _review_form(item) -> None:
     if err:
         st.error(err)
     st.button("Enregistrer la décision", key=f"rv_save_{fid}", type="primary", on_click=_submit_decision,
-              args=(f, fid, action, fields))
+              args=(f, fid, action, fields), disabled=bool(review_error))
 
 
 def _submit_decision(f, fid: str, action: str, fields: dict) -> None:
@@ -724,7 +742,11 @@ def _submit_decision(f, fid: str, action: str, fields: dict) -> None:
     if errors:
         st.session_state[f"rv_err_{fid}"] = "Décision non enregistrée : " + " ; ".join(errors) + "."
         return
-    _save_decision(dec)
+    try:
+        _save_decision(dec)
+    except ReviewFileError as e:
+        st.session_state[f"rv_err_{fid}"] = f"Décision non enregistrée : {e}"
+        return
     st.session_state.pop(f"rv_edit_{fid}", None)
 
 
@@ -753,8 +775,9 @@ def _review_card(item) -> None:
             with st.expander("Traiter ce point", expanded=d is not None):
                 for p in related:
                     q1, q2 = st.columns([4, 1.3], vertical_alignment="center")
-                    q1.markdown(f"<span class='muted'>Proposition du LLM ({escape(p.kind)}) : <b>{escape(p.title)}</b>"
-                                f" : {escape(p.text)}</span>", unsafe_allow_html=True)
+                    q1.markdown(f"<span class='muted'>Proposition du LLM ({escape(p.kind)}) : "
+                                f"<b>{escape(llm_md(p.title))}</b> : {escape(llm_md(p.text))}</span>",
+                                unsafe_allow_html=True)
                     q2.button("Reprendre et modifier", key=f"rv_use_{fid}_{p.proposal_id}", on_click=_use_proposal,
                               args=(fid, p, p.kind), width="stretch")
                 _review_form(item)
@@ -762,13 +785,20 @@ def _review_card(item) -> None:
 
 if step == 3:
     with st.container(key="stepbody_3"):   # nouveau bloc à chaque étape : rien ne reste de la précédente
-        store = load_store(PROPOSALS_PATH)
+        # Fichier illisible : on continue sans son contenu, on le signale, et rien n'y est écrit (pas d'écrasement).
+        try:
+            store, store_error = load_store(store_path(PROPOSALS_PATH, SETTINGS.out_dir)), ""
+        except ProposalFileError as e:
+            store, store_error = ProposalStore(), str(e)
         accepted = ProposalStore(proposals=store.accepted())
-        review = load_review(SETTINGS.review_file)
-        review_json = review.model_dump_json()
+        try:
+            review, review_error = load_review(SETTINGS.review_file), ""
+        except ReviewFileError as e:
+            review, review_error = ReviewStore(), str(e)
+        review_json, accepted_json = review.model_dump_json(), accepted.model_dump_json()
         gen, matrix, cov, trace_csv = cached_generate(
             f"{export_key}|{'|'.join(translated)}|{hashlib.sha256(review_json.encode()).hexdigest()}", ex, translated,
-            accepted.model_dump_json(), review_json)
+            accepted_json, review_json)
         catia_files = cached_catia(f"{export_key}|{'|'.join(translated)}", ex, translated)
         findings = cached_findings(export_key, ex)
         rv_state = review_state(findings, review)
@@ -793,6 +823,9 @@ if step == 3:
                                      "un fichier autonome par use case pour CATIA Community")
         if translated != selected:
             st.info("La sélection a changé depuis cette traduction. Revenez à l'étape Choisir pour traduire à nouveau.")
+        for err in (review_error, store_error):
+            if err:
+                st.error(err)
         _ledger(matrix)
 
         # libellés fixes : un libellé qui change (compteur) ferait perdre l'onglet ouvert à Streamlit
@@ -935,9 +968,10 @@ if step == 3:
                 llm_ok, llm_label = provider_status(SETTINGS.llm)
                 st.markdown(f"Fournisseur : **{llm_label}**" if llm_ok else f"⚠️ {llm_label}")
 
-                if st.button("Générer des propositions", disabled=not llm_ok):
+                if st.button("Générer des propositions", disabled=not llm_ok or bool(store_error)):
                     try:
-                        provider, tctx = make_provider(SETTINGS.llm), cached_tool_context(export_key, ex)
+                        provider = make_provider(SETTINGS.llm)
+                        tctx = cached_tool_context(export_key, ex, accepted_json, review_json)
                         res = run_live("Le LLM analyse les points à valider", llm_key("enrich"),
                                        lambda ev: enrich(provider, tctx, on_event=ev))
                     except LlmUnavailable as e:
@@ -958,8 +992,8 @@ if step == 3:
                 for p in shown:
                     with st.container(border=True):
                         st.markdown(badges(p.kind, p.status, f"origin = {p.origin}"), unsafe_allow_html=True)
-                        st.markdown(f"**{p.title}**  \n{p.text}")
-                        html(f"<span class='muted'>{escape(p.rationale)}</span><br>"
+                        st.markdown(f"**{llm_md(p.title)}**  \n{llm_md(p.text)}")
+                        html(f"<span class='muted'>{escape(llm_md(p.rationale))}</span><br>"
                              f"<span class='ids'>cibles : {' · '.join(p.target_ids)} · id {p.proposal_id}</span>")
                         b1, b2, _ = st.columns([1, 1, 1.5])
                         b1.button("Accepter", key=f"acc_{p.proposal_id}", on_click=_decide,
@@ -981,7 +1015,7 @@ if step == 3:
                     history = st.session_state.setdefault(hist_key, [])
                     for turn in history:
                         with st.chat_message(turn["role"]):
-                            st.markdown(turn["content"])
+                            st.markdown(llm_md(turn["content"]))
                             if turn.get("tools"):
                                 st.caption("Outils appelés : " + ", ".join(turn["tools"]))
                     question = st.chat_input("Ex. : quels besoins implicites ne sont couverts par aucun user need ?")
@@ -991,13 +1025,14 @@ if step == 3:
                         with st.chat_message("assistant"):
                             try:
                                 past = [{"role": t["role"], "content": t["content"]} for t in history]
-                                provider, tctx = make_provider(SETTINGS.llm), cached_tool_context(export_key, ex)
+                                provider = make_provider(SETTINGS.llm)
+                                tctx = cached_tool_context(export_key, ex, accepted_json, review_json)
                                 ans = run_live("L'assistant interroge le modèle", llm_key("chat"),
                                                lambda ev: ask(provider, tctx, question, past, on_event=ev))
                             except LlmUnavailable as e:
                                 st.error(str(e))
                                 st.stop()
-                            st.markdown(ans.text)
+                            st.markdown(llm_md(ans.text))
                             tools = [c["name"] for c in ans.tool_calls]
                             if tools:
                                 st.caption("Outils appelés : " + ", ".join(tools))

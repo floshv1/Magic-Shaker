@@ -1,5 +1,6 @@
 """Configuration du pipeline : lue dans pyproject.toml ([tool.p9]), surchargeable par
-variables d'environnement (P9_DATA_DIR, P9_OUT_DIR, P9_REVIEW_FILE, P9_SYSML_HOME, P9_JAVA_HOME, P9_LLM_*) ou `.env`."""
+variables d'environnement (P9_DATA_DIR, P9_OUT_DIR, P9_REVIEW_FILE, P9_PROPOSALS_FILE, P9_SYSML_HOME, P9_JAVA_HOME,
+P9_LLM_*) ou `.env`."""
 
 from __future__ import annotations
 
@@ -9,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 _DEFAULTS = {"data_dir": "data/usershaker", "out_dir": "out", "review_file": "review/decisions.json",
-             "llm_eval_file": "evals/llm_questions.json"}
+             "proposals_file": "review/llm_proposals.json", "llm_eval_file": "evals/llm_questions.json"}
 _GENERATE_DEFAULTS = {
     "project_package": "Project",
     "common_package": "Common",
@@ -96,6 +97,7 @@ class Settings:
     llm: LlmSettings = field(default_factory=lambda: LlmSettings(**_LLM_DEFAULTS))
     catia: CatiaSettings = field(default_factory=lambda: CatiaSettings(**_CATIA_DEFAULTS))
     review_file: Path | None = None      # décisions humaines sur les points à valider (versionné)
+    proposals_file: Path | None = None   # propositions LLM et leur statut accepted / rejected (versionné)
     llm_eval_file: Path | None = None    # questions de mesure de l'agent de chat (versionné)
 
 
@@ -130,5 +132,5 @@ def load_settings(start: Path | None = None) -> Settings:
     )
     catia = CatiaSettings(**{**_CATIA_DEFAULTS, **tool.get("catia", {})})
     return Settings(root=root, data_dir=resolve("data_dir"), out_dir=resolve("out_dir"), generate=gen, omg=omg,
-                    llm=llm, catia=catia, review_file=resolve("review_file"),
+                    llm=llm, catia=catia, review_file=resolve("review_file"), proposals_file=resolve("proposals_file"),
                     llm_eval_file=resolve("llm_eval_file"))

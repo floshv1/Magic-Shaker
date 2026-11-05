@@ -74,6 +74,33 @@ def test_zip_illisible() -> None:
         load_zip(b"pas un zip")
 
 
+@pytest.mark.parametrize("offset, value, why", [
+    (8, b"\x01\x00", "encrypted"),            # drapeau « chiffré » : zipfile demande un mot de passe
+    (10, b"\x63\x00", "compression"),         # méthode 99 (AES) : non gérée par zipfile
+])
+def test_zip_chiffre_ou_compression_inconnue(export_zip, offset: int, value: bytes, why: str) -> None:
+    raw = bytearray(export_zip)
+    i = raw.find(b"PK\x01\x02")               # 1re entrée du répertoire central
+    raw[i + offset:i + offset + 2] = value
+    with pytest.raises(ExportUnreadable, match=why):
+        load_zip(bytes(raw))
+
+
+def test_zip_donnees_abimees() -> None:
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:    # compressé, comme un vrai export : zlib.error
+        for name, data in real_files().items():
+            z.writestr(f"export/{name}", data)
+    raw = bytearray(buf.getvalue())
+    i = raw.find(b"PK\x03\x04")               # 1re entrée : en-tête local (30 octets + nom), puis les données
+    start = i + 30 + int.from_bytes(raw[i + 26:i + 28], "little") + int.from_bytes(raw[i + 28:i + 30], "little")
+    raw[start:start + 8] = b"\xff" * 8
+    with pytest.raises(ExportUnreadable):
+        load_zip(bytes(raw))
+
+
 def test_feuille_obligatoire_manquante() -> None:
     files = real_files()
     del files["personas.csv"]

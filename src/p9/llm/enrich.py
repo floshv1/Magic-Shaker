@@ -5,7 +5,8 @@
   Pas de biographie, pas d'URL, pas d'export complet.
 - Sortie : JSON structuré validé par pydantic ; chaque proposition est `origin="llm"`,
   `status="to_validate"`, et ne cite que des ids qui existent dans l'export.
-- Les décisions humaines (accepted / rejected) sont stockées à part (out/proposals.json).
+- Les décisions humaines (accepted / rejected) sont stockées à part (`proposals_file`, versionné :
+  review/llm_proposals.json par défaut).
 """
 
 from __future__ import annotations
@@ -26,18 +27,17 @@ Kind = Literal["guard", "requirement", "rephrase"]
 Decision = Literal["to_validate", "accepted", "rejected"]
 
 
+TITLE_MAX, TEXT_MAX, TARGETS_MAX = 120, 1200, 8
+
+
 class RawProposal(BaseModel):
     """Ce que le LLM renvoie (schéma imposé)."""
 
     kind: Kind
-    title: str = Field(min_length=3, max_length=120)
-    text: str = Field(min_length=3, max_length=1200)
-    rationale: str = Field(min_length=3, max_length=1200)
-    target_ids: list[str] = Field(min_length=1, max_length=8)
-
-
-class RawProposals(BaseModel):
-    proposals: list[RawProposal]
+    title: str = Field(min_length=3, max_length=TITLE_MAX)
+    text: str = Field(min_length=3, max_length=TEXT_MAX)
+    rationale: str = Field(min_length=3, max_length=TEXT_MAX)
+    target_ids: list[str] = Field(min_length=1, max_length=TARGETS_MAX)
 
 
 class Proposal(RawProposal):
@@ -68,16 +68,19 @@ Ne propose rien si le point ne le justifie pas. Reponds en francais.
 
 
 def output_schema() -> dict[str, Any]:
+    """Limites de longueur dans les descriptions : les sorties structurées de l'API Claude refusent minLength /
+    maxLength. RawProposal les vérifie ensuite, proposition par proposition."""
     return {
         "type": "object",
         "properties": {"proposals": {"type": "array", "items": {
             "type": "object",
             "properties": {
                 "kind": {"type": "string", "enum": ["guard", "requirement", "rephrase"]},
-                "title": {"type": "string"},
-                "text": {"type": "string"},
-                "rationale": {"type": "string"},
-                "target_ids": {"type": "array", "items": {"type": "string"}},
+                "title": {"type": "string", "description": f"nom court, {TITLE_MAX} caracteres au plus"},
+                "text": {"type": "string", "description": f"{TEXT_MAX} caracteres au plus"},
+                "rationale": {"type": "string", "description": f"une ou deux phrases, {TEXT_MAX} caracteres au plus"},
+                "target_ids": {"type": "array", "items": {"type": "string"},
+                               "description": f"1 a {TARGETS_MAX} ids presents dans les donnees fournies"},
             },
             "required": ["kind", "title", "text", "rationale", "target_ids"],
             "additionalProperties": False,
@@ -126,14 +129,28 @@ def proposal_id(p: RawProposal) -> str:
 
 
 def validate_proposals(raw_json: str, ex: Export, valid_ids: set[str]) -> EnrichResult:
+    """Chaque proposition est validée seule : une proposition non conforme est écartée avec sa raison, sans
+    faire perdre les autres."""
     res = EnrichResult()
     try:
-        raw = RawProposals.model_validate_json(raw_json)
-    except ValidationError as e:
-        res.invalid.append({"error": "sortie LLM non conforme au schema", "detail": str(e)[:500]})
+        data = json.loads(raw_json)
+    except json.JSONDecodeError as e:
+        res.invalid.append({"error": "sortie LLM non conforme au schema", "detail": f"JSON invalide : {e}"[:500]})
+        return res
+    items = data.get("proposals") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        res.invalid.append({"error": "sortie LLM non conforme au schema", "detail": "liste 'proposals' absente"})
         return res
     seen: set[str] = set()
-    for p in raw.proposals:
+    for item in items:
+        try:
+            p = RawProposal.model_validate(item)
+        except ValidationError as e:
+            title = item.get("title") if isinstance(item, dict) else None
+            res.invalid.append({
+                "title": str(title or "?")[:TITLE_MAX], "error": "proposition non conforme au schema",
+                "detail": "; ".join(f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in e.errors())[:500]})
+            continue
         bad = [i for i in p.target_ids if i not in valid_ids]
         if bad:
             res.invalid.append({"title": p.title, "error": f"ids inconnus : {bad}"})
@@ -186,13 +203,36 @@ class ProposalStore(BaseModel):
         return [p for p in self.proposals if p.status == "accepted"]
 
 
+LEGACY_STORE = "proposals.json"     # ancien emplacement, dans out/ (ignoré par git, effacé par `make clean`)
+
+
+def store_path(proposals_file: Path | None, out_dir: Path) -> Path:
+    """Fichier de propositions à lire : `proposals_file`, ou l'ancien out/proposals.json tant qu'il n'existe pas
+    (les décisions déjà prises restent appliquées ; le prochain enregistrement écrit `proposals_file`)."""
+    legacy = out_dir / LEGACY_STORE
+    if proposals_file is None:
+        return legacy
+    return legacy if not proposals_file.is_file() and legacy.is_file() else proposals_file
+
+
+class ProposalFileError(ValueError):
+    """Fichier de propositions présent mais illisible : on refuse de l'écraser (décisions accepted / rejected)."""
+
+
 def load_store(path: Path) -> ProposalStore:
+    """Store vide si le fichier n'existe pas encore ; un fichier illisible lève ProposalFileError."""
     if not path.is_file():
         return ProposalStore()
     try:
         return ProposalStore.model_validate_json(path.read_text(encoding="utf-8"))
-    except ValidationError:
-        return ProposalStore()
+    except ValidationError as e:
+        err = e.errors()[0]
+        where = ".".join(map(str, err["loc"]))
+        detail = f"{where} : {err['msg']}" if where else err["msg"]
+    except (OSError, ValueError) as e:
+        detail = str(e)
+    raise ProposalFileError(f"{path} illisible ({detail}). Corrigez ou supprimez le fichier : aucune proposition "
+                            "n'est appliquee ni enregistree tant qu'il est illisible.")
 
 
 def save_store(store: ProposalStore, path: Path) -> None:

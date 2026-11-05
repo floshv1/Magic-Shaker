@@ -20,12 +20,16 @@ def main(argv: list[str]) -> int:
     if ex.report.missing_required:
         print(f"Feuilles obligatoires manquantes : {ex.report.missing_required}")
         return 2
-    # Propositions LLM acceptées par un humain (out/proposals.json), rendues dans un package séparé.
-    from p9.llm.enrich import load_store
-    accepted = load_store(s.out_dir / "proposals.json").accepted()
-    # Décisions humaines sur les points à valider (review/decisions.json, versionné).
-    from p9.review import load_review
-    decisions = load_review(s.review_file).decisions
+    from p9.llm.enrich import ProposalFileError, load_store, store_path
+    from p9.review import ReviewFileError, load_review
+    try:
+        # Propositions LLM acceptées par un humain (review/llm_proposals.json), rendues dans un package séparé.
+        accepted = load_store(store_path(s.proposals_file, s.out_dir)).accepted()
+        # Décisions humaines sur les points à valider (review/decisions.json, versionné).
+        decisions = load_review(s.review_file).decisions
+    except (ProposalFileError, ReviewFileError) as e:   # générer sans elles les perdrait en silence
+        print(f"Erreur : {e}")
+        return 2
     gen = generate(ex, cfg=s.generate, accepted_proposals=accepted, review_decisions=decisions)
     if accepted:
         print(f"{len(accepted)} proposition(s) LLM acceptee(s) incluse(s) (package separe, origin=llm)")

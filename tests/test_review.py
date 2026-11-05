@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from p9.checks import build_matrix, run_all
+from p9.checks import build_matrix, coverage, run_all
 from p9.generate import generate
 from p9.review import (
     Decision,
+    ReviewFileError,
     ReviewStore,
     decision_errors,
     finding_id,
@@ -73,6 +74,21 @@ def test_stockage_stable_et_relu(tmp_path, findings) -> None:
     assert load_review(tmp_path / "absent.json").decisions == []
 
 
+def test_fichier_illisible_jamais_lu_comme_vide(tmp_path, findings) -> None:
+    """Conflit git ou JSON abîmé : lever une erreur, sinon le prochain enregistrement effacerait tout."""
+    path = tmp_path / "decisions.json"
+    store = ReviewStore()
+    store.upsert(_dec(findings["implicit_needs"][0], "dismiss", reason="pas un besoin produit"))
+    save_review(store, path)
+    good = path.read_text(encoding="utf-8")
+    path.write_text(f"<<<<<<< HEAD\n{good}=======\n{good}>>>>>>> autre\n", encoding="utf-8")
+    with pytest.raises(ReviewFileError, match="illisible"):
+        load_review(path)
+    path.write_text('{"decisions": [{"finding_id": "x"}]}', encoding="utf-8")       # JSON valide, schéma faux
+    with pytest.raises(ReviewFileError, match=r"decisions\.0\."):
+        load_review(path)
+
+
 def test_etat_de_la_revue_et_decisions_orphelines(findings) -> None:
     store = ReviewStore()
     store.upsert(_dec(findings["implicit_needs"][0], "dismiss", reason="pas un besoin produit"))
@@ -112,6 +128,12 @@ def test_rendu_separe_et_traceabilite(export, findings) -> None:
     rows = [e for e in matrix if e.kind == "text_constraint"]
     assert rows and all(e.status == "mapped" and "garde ajoutee par Testeur" in e.reason for e in rows)
     assert all(e.sysml_qualified_name.startswith("ESpaceConceptReview::") for e in rows)
+    # chaque élément ajouté au package de revue a sa ligne dans la matrice (fix_at_source n'ajoute rien)
+    added = {e.usershaker_id: e for e in matrix if e.kind == "review_decision"}
+    assert set(added) == {d.finding_id for d in decisions if d.action != "fix_at_source"}
+    assert all(e.status == "mapped" and "origin=human" in e.reason and e.file == REVIEW_PKG for e in added.values())
+    cov = next(r for r in coverage(export, gen, matrix) if r.element == "Contraintes en texte libre")
+    assert (cov.translated, cov.partial, cov.percent) == (2, 0, 100) and "a modeliser" not in cov.note
     base_rows = [e for e in build_matrix(export, base, findings["constraints_in_text_only"]) if e.kind == "text_constraint"]
     assert all(e.status == "partial" for e in base_rows)
     assert "Testeur" in review_csv(ReviewStore(decisions=decisions))
@@ -122,9 +144,13 @@ def test_ecarter_un_point_le_trace_avec_sa_raison(export, findings) -> None:
     d = _dec(speed, "dismiss", reason="la vitesse est geree par le calculateur, hors parcours")
     gen = generate(export, review_decisions=[d])
     assert REVIEW_PKG not in gen.files                                # rien à ajouter au modèle
-    row = next(e for e in build_matrix(export, gen, findings["constraints_in_text_only"], [d])
-               if e.kind == "text_constraint" and speed.step_id in e.usershaker_id)
+    matrix = build_matrix(export, gen, findings["constraints_in_text_only"], [d])
+    row = next(e for e in matrix if e.kind == "text_constraint" and speed.step_id in e.usershaker_id)
     assert row.status == "mapped" and "ecarte par Testeur" in row.reason and "calculateur" in row.reason
+    # la couverture suit la matrice : une contrainte traitée, l'autre encore à modéliser
+    cov = next(r for r in coverage(export, gen, matrix) if r.element == "Contraintes en texte libre")
+    assert (cov.translated, cov.partial, cov.percent) == (1, 1, 50)
+    assert "1 traitee(s) par une decision humaine" in cov.note and "1 conservee(s)" in cov.note
 
 
 def test_use_case_non_selectionne_signale(export, findings) -> None:

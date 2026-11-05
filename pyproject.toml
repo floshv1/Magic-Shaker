@@ -37,6 +37,9 @@ data_dir = "data/usershaker"
 out_dir = "out"
 # Décisions humaines sur les points à valider : versionnées dans git (partagées par l'équipe).
 review_file = "review/decisions.json"
+# Propositions du LLM et leur statut (accepted / rejected) : versionnées elles aussi. Lu en repli tant que ce
+# fichier n'existe pas : l'ancien out/proposals.json.
+proposals_file = "review/llm_proposals.json"
 # Questions de mesure de l'agent de chat (`make eval-llm`), avec leurs reponses attendues.
 llm_eval_file = "evals/llm_questions.json"
 

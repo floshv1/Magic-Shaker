@@ -6,7 +6,7 @@ import io
 import pytest
 
 from p9.checks import build_matrix, coverage, coverage_html, matrix_csv, run_all
-from p9.checks.consistency import refers_to, sentences, tokens
+from p9.checks.consistency import persona_inconsistencies, refers_to, seat_roles, sentences, tokens
 from p9.generate import generate
 
 
@@ -49,6 +49,26 @@ def test_incoherence_personas_jacques_hugo(findings) -> None:
     assert any("Jacques" in m and "front passenger" in m and "Hugo" in m and "absent" in m for m in msgs)
     assert any("Long trip" in m and "Lounge stop while charging" in m and "Hugo seulement dans" in m for m in msgs)
     assert len(msgs) == 2
+
+
+def _with_text(export, old: str, new: str):
+    """Copie de l'export où `old` est remplacé par `new` dans les textes lus (story, description, trigger_text)."""
+    def swap(row, fields):
+        upd = {f: getattr(row, f).replace(old, new) for f in fields if old in (getattr(row, f) or "")}
+        return row.model_copy(update=upd) if upd else row
+    return export.model_copy(update={"use_cases": [swap(u, ("story", "description")) for u in export.use_cases],
+                                     "steps": [swap(s, ("description", "trigger_text")) for s in export.steps]})
+
+
+def test_role_attribue_au_persona_le_plus_proche(export) -> None:
+    old = "Jacques has taken the front passenger seat"
+    # deux personas cités : le rôle est celui de Hugo (nommé juste avant), conforme à sa biographie
+    ex = _with_text(export, old, "Jacques sits behind Hugo, who is the front passenger,")
+    assert not [f for f in persona_inconsistencies(ex) if f.detail.get("role")]
+    # « co-driver » n'est pas « driver » (rôle que la biographie de Camille lui donne)
+    ex = _with_text(export, old, "Jacques waves at the co-driver")
+    assert not [f for f in persona_inconsistencies(ex) if f.detail.get("role")]
+    assert [r for r, _ in seat_roles("The co-driver and the driver's seat.")] == ["co-driver", "driver's seat"]
 
 
 def test_besoin_implicite_distance(findings) -> None:
@@ -97,7 +117,8 @@ def test_couverture_jamais_100_si_incomplet(export, gen, matrix) -> None:
     assert cov["Steps"].percent == 100
     trig = cov["Triggers / conditions"]
     assert trig.in_export == 29 and trig.translated == 25 and trig.percent == 86
-    assert cov["Contraintes en texte libre"].percent == 0
+    text = cov["Contraintes en texte libre"]
+    assert text.percent == 0 and text.partial == 2 and "a modeliser" in text.note
 
 
 def test_rapport_html(export, gen, matrix, findings) -> None:

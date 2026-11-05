@@ -109,6 +109,21 @@ def test_selection_partielle(export) -> None:
     assert "UC2 'Long trip" in g.files["ESpaceCommon.sysml"]
 
 
+def test_phase_non_contigue_signalee(export) -> None:
+    """Steps d'une phase séparés par une autre phase : deux actions, et la scission est dans la traçabilité."""
+    uc1 = next(u for u in export.use_cases if u.position == 1)
+    steps = export.steps_of(uc1.use_case_id)
+    first = steps[0].group_id
+    k = next(i for i, s in enumerate(steps) if s.group_id != first) + 1    # step après le début de la 2e phase
+    moved = steps[k].model_copy(update={"group_id": first})
+    ex = export.model_copy(update={"steps": [moved if s.step_id == moved.step_id else s for s in export.steps]})
+    g = generate(ex, [uc1.use_case_id])
+    assert re.findall(r"then action (approachPhase\d*)", g.files["UC1_WelcomeOnBoard.sysml"]) == [
+        "approachPhase", "approachPhase2"]
+    e = next(e for e in g.trace if e.kind == "step_group" and e.usershaker_id == first)
+    assert "groupe non contigu : scinde en 2 actions (approachPhase, approachPhase2)" in e.reason
+
+
 def test_fichier_unique(gen) -> None:
     assert gen.single_file.startswith("package ESpaceConcept {")
     assert gen.single_file.count("\npackage ") == 5

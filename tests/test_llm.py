@@ -6,10 +6,12 @@ import json
 
 import pytest
 
+from p9.checks import build_matrix
 from p9.generate import generate
 from p9.llm import (
     TOOLS,
     Proposal,
+    ProposalFileError,
     ProposalStore,
     ToolContext,
     ask,
@@ -104,6 +106,29 @@ def test_enrichissement_valide_et_marque(ctx) -> None:
 def test_sortie_non_conforme(ctx) -> None:
     res = validate_proposals('{"proposals": [{"kind": "autre"}]}', ctx.export, set())
     assert not res.proposals and res.invalid
+    res = validate_proposals("pas du json", ctx.export, set())
+    assert not res.proposals and "JSON invalide" in res.invalid[0]["detail"]
+
+
+def test_une_proposition_non_conforme_n_ecarte_pas_les_autres(ctx) -> None:
+    step = next(s for s in ctx.export.steps if s.name == "Parking ratio")
+    ok = {"kind": "guard", "title": "Vitesse sous 10 km/h", "text": "Vitesse < 10 km/h.", "rationale": "trigger_text",
+          "target_ids": [step.step_id]}
+    raw = json.dumps({"proposals": [ok, {**ok, "title": "T" * 130}]})
+    res = validate_proposals(raw, ctx.export, {step.step_id})
+    assert [p.title for p in res.proposals] == ["Vitesse sous 10 km/h"]
+    assert len(res.invalid) == 1 and "title" in res.invalid[0]["detail"]
+
+
+def test_schema_de_sortie_sans_mot_cle_refuse_par_l_api() -> None:
+    """minLength / maxLength / minItems… : refusés par les sorties structurées de l'API Claude (erreur 400)."""
+    from p9.llm.enrich import output_schema
+
+    def keys(node) -> set[str]:
+        if isinstance(node, dict):
+            return set(node) | {k for v in node.values() for k in keys(v)}
+        return {k for v in node for k in keys(v)} if isinstance(node, list) else set()
+    assert not keys(output_schema()) & {"minLength", "maxLength", "minItems", "maxItems", "minimum", "maximum"}
 
 
 def _proposal(ctx, **kw) -> Proposal:
@@ -122,6 +147,39 @@ def test_store_decisions(ctx, tmp_path) -> None:
     save_store(store, tmp_path / "p.json")
     again = load_store(tmp_path / "p.json")
     assert [q.status for q in again.proposals] == ["accepted"] and len(again.accepted()) == 1
+    (tmp_path / "p.json").write_text("{ pas du json", encoding="utf-8")     # illisible : jamais lu comme vide
+    with pytest.raises(ProposalFileError, match="illisible"):
+        load_store(tmp_path / "p.json")
+
+
+def test_emplacement_des_propositions(tmp_path) -> None:
+    from p9.llm import store_path
+    new, out = tmp_path / "review" / "llm_proposals.json", tmp_path / "out"
+    assert store_path(new, out) == new                        # rien d'existant : le fichier versionné
+    out.mkdir()
+    (out / "proposals.json").write_text("{}", encoding="utf-8")
+    assert store_path(new, out) == out / "proposals.json"     # l'ancien est relu tant que le nouveau n'existe pas
+    new.parent.mkdir()
+    new.write_text("{}", encoding="utf-8")
+    assert store_path(new, out) == new
+
+
+def test_l_agent_voit_les_decisions_humaines(export) -> None:
+    """Une contrainte en texte libre écartée par un humain n'est plus « partielle » pour l'agent."""
+    from p9.checks import finding_id, run_all
+    from p9.review import Decision
+    speed = next(f for f in run_all(export)["constraints_in_text_only"] if "10 km/h" in f.message)
+    d = Decision(finding_id=finding_id(speed), check=speed.check, action="dismiss", author="Testeur",
+                 decided_at="2026-11-05", reason="vitesse geree hors parcours", target_ids=list(speed.ids))
+
+    def text_rows(c: ToolContext, status: str) -> list[str]:
+        rows = json.loads(run_tool(c, "traceability_status", {"status": status})[0])["rows"]
+        return [r["usershaker_id"] for r in rows if r["kind"] == "text_constraint"]
+    assert any(speed.step_id in i for i in text_rows(ToolContext(export), "partial"))
+    with_decision = ToolContext(export, review_decisions=[d])
+    assert not any(speed.step_id in i for i in text_rows(with_decision, "partial"))
+    rows = [e for k, es in with_decision.trace.items() if speed.step_id in k for e in es if e.kind == "text_constraint"]
+    assert rows and all(e.status == "mapped" and "ecarte par Testeur" in e.reason for e in rows)
 
 
 def test_rendu_propositions_acceptees_separees(ctx) -> None:
@@ -136,6 +194,10 @@ def test_rendu_propositions_acceptees_separees(ctx) -> None:
     assert "LlmOrigin" not in g.single_file              # jamais mélangé au modèle d'origine
     assert "LlmOrigin" not in g.files["ESpaceCommon.sysml"]
     assert {e.kind for e in g.trace if e.kind == "llm_proposal"} == {"llm_proposal"}
+    # chaque proposition acceptée a sa ligne dans la matrice de traçabilité, avec son origine
+    rows = [e for e in build_matrix(ctx.export, g) if e.kind == "llm_proposal"]
+    assert sorted(e.usershaker_id for e in rows) == sorted(p.proposal_id for p in accepted)
+    assert all("origin=llm" in e.reason and e.file == "ESpaceConceptLlmProposals.sysml" for e in rows)
 
 
 # ------------------------------------------------------------ outils ajoutés, relance, mesure
@@ -189,6 +251,34 @@ def test_relance_sur_erreur_passagere(monkeypatch) -> None:
     with pytest.raises(providers.LlmUnavailable, match="3 essais"):
         prov._post({})
     assert not providers._is_transient("model 'x' not found")
+
+
+@pytest.mark.parametrize("host, url", [
+    ("http://localhost:11434/", "http://localhost:11434"),
+    ("127.0.0.1:11434", "http://127.0.0.1:11434"),           # format du serveur Ollama, sans schéma
+    ("0.0.0.0", "http://127.0.0.1:11434"),                   # adresse d'écoute : on se connecte en local
+    ("https://ollama.example.org", "https://ollama.example.org"),
+])
+def test_adresse_ollama(host: str, url: str) -> None:
+    from p9.llm.providers import ollama_base_url
+    assert ollama_base_url(host) == url
+
+
+def test_ollama_muet_n_est_pas_injoignable(monkeypatch) -> None:
+    """Un délai dépassé (modèle trop lent) ne doit pas dire « lancer ollama serve », ni relancer 5 minutes."""
+    from p9.config import load_settings
+    from p9.llm import providers
+    prov = providers.OllamaProvider(load_settings().llm)
+    calls = []
+
+    def silent(req, timeout=None):
+        calls.append(timeout)
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(providers.urllib.request, "urlopen", silent)
+    with pytest.raises(providers.LlmUnavailable, match="n'a rien envoye pendant 300 s") as e:
+        prov._post({"model": "x", "messages": []})
+    assert "ollama serve" not in str(e.value) and calls == [300]
 
 
 def test_score_d_une_reponse() -> None:

@@ -34,6 +34,7 @@ class CommonNames:
     state: dict[str, str] = field(default_factory=dict)            # state_id → state (dans le state def)
     requirement: dict[str, str] = field(default_factory=dict)      # user_need_id → requirement def
     event: dict[str, str] = field(default_factory=dict)            # state_id → item def (événement)
+    use_case: dict[str, str] = field(default_factory=dict)         # use_case_id → use case def
 
 
 def by_pos(rows, *keys: str):
@@ -62,6 +63,10 @@ def compute_common_names(ex: Export, cfg: GenerateSettings) -> CommonNames:
             st = state_by_id[t.state_id]
             comp = n.component_def.get(st.component_id, "Component")
             n.event[t.state_id] = namer.take(f"{comp}Is{pascal(st.name)}")
+    # use case def : nommés en dernier (les noms ci-dessus ne bougent pas), uniques face aux définitions
+    # communes, car le fichier CATIA d'un use case met tout dans un seul package
+    for uc in by_pos(ex.use_cases, "position", "use_case_id"):
+        n.use_case[uc.use_case_id] = namer.name(uc.name, upper=True)
     # parts des composants, une portée par parent (ESpace ou composant objet)
     scopes: dict[str | None, Namer] = defaultdict(Namer)
     known = {c.component_id for c in comps}
@@ -383,7 +388,7 @@ def use_case_package(uc: m.UseCase) -> str:
 def build_use_case(ex: Export, cfg: GenerateSettings, names: CommonNames, uc: m.UseCase) -> tuple[dict, list[TraceEntry]]:
     common = cfg.common_package
     pkg = use_case_package(uc)
-    ucdef = pascal(uc.name)
+    ucdef = names.use_case[uc.use_case_id]
     base_qn = f"{pkg}::{ucdef}"
     trace: list[TraceEntry] = []
     namer = Namer({cfg.subject_name, "start", "done"} | RESERVED)
@@ -441,21 +446,21 @@ def build_use_case(ex: Export, cfg: GenerateSettings, names: CommonNames, uc: m.
 
     flow: list[dict] = []      # éléments de premier niveau : phases ou steps sans phase
     step_qn: dict[str, str] = {}
-    seen_groups: dict[str, str] = {}
+    group_trace: dict[str, TraceEntry] = {}
+    group_actions: dict[str, list[str]] = defaultdict(list)   # phase → ses actions (plusieurs si non contiguë)
     for step in ex.steps_of(uc.use_case_id):
         gid = step.group_id if step.group_id in groups else None
         phase_name = groups[gid].name if gid else None
         if gid and (not flow or flow[-1].get("group_id") != gid):
             g = groups[gid]
             pn = namer.name(g.name, suffix="Phase")
-            reason = ignored(g, ("color",))
-            if gid in seen_groups:
-                reason = join_doc(reason, "groupe non contigu : scinde en plusieurs actions", sep="; ")
-            else:
-                seen_groups[gid] = pn
+            group_actions[gid].append(pn)
+            if gid not in group_trace:
                 gst, gwhy = status_for(g)
-                trace.append(TraceEntry(usershaker_id=gid, kind="step_group", sysml_qualified_name=f"{base_qn}::{pn}",
-                                        status=gst, reason=join_doc(gwhy, reason, sep="; ")))
+                group_trace[gid] = TraceEntry(usershaker_id=gid, kind="step_group",
+                                              sysml_qualified_name=f"{base_qn}::{pn}", status=gst,
+                                              reason=join_doc(gwhy, ignored(g, ("color",)), sep="; "))
+                trace.append(group_trace[gid])
             flow.append({"kind": "phase", "name": pn, "id": gid, "group_id": gid,
                          "doc": f"Phase {g.position} : {g.name}.", "steps": []})
         sn = namer.name(step.name)
@@ -518,6 +523,11 @@ def build_use_case(ex: Export, cfg: GenerateSettings, names: CommonNames, uc: m.
             flow[-1]["steps"].append(item)
         else:
             flow.append(item)
+    for gid, actions in group_actions.items():
+        if len(actions) > 1:       # steps d'une même phase séparés par une autre : une action par morceau
+            e = group_trace[gid]
+            e.reason = join_doc(e.reason, f"groupe non contigu : scinde en {len(actions)} actions "
+                                          f"({', '.join(actions)})", sep="; ")
 
     dependencies = []
     step_pos = {s.step_id: s.position for s in ex.steps_of(uc.use_case_id)}

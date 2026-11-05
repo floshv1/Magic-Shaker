@@ -14,7 +14,7 @@ from p9.config import load_settings
 from p9.generate import generate, generate_catia
 from p9.ingest import ExportUnreadable, load_path
 
-from . import build_matrix, coverage, coverage_html, matrix_csv, run_all, status_counts
+from . import ADDED_KINDS, build_matrix, coverage, coverage_html, matrix_csv, run_all, status_counts
 
 
 def main(argv: list[str]) -> int:
@@ -24,11 +24,15 @@ def main(argv: list[str]) -> int:
     except ExportUnreadable as e:
         print(f"Erreur : {e}")
         return 2
-    from p9.llm.enrich import load_store
-    from p9.review import load_review, review_csv
-    review = load_review(s.review_file)
-    gen = generate(ex, cfg=s.generate, accepted_proposals=load_store(s.out_dir / "proposals.json").accepted(),
-                   review_decisions=review.decisions)
+    from p9.llm.enrich import ProposalFileError, load_store, store_path
+    from p9.review import ReviewFileError, load_review, review_csv
+    try:
+        review = load_review(s.review_file)
+        accepted = load_store(store_path(s.proposals_file, s.out_dir)).accepted()
+    except (ProposalFileError, ReviewFileError) as e:
+        print(f"Erreur : {e}")
+        return 2
+    gen = generate(ex, cfg=s.generate, accepted_proposals=accepted, review_decisions=review.decisions)
     findings = run_all(ex)
     matrix = build_matrix(ex, gen, findings["constraints_in_text_only"], review.decisions)
     cov = coverage(ex, gen, matrix)
@@ -62,7 +66,7 @@ def main(argv: list[str]) -> int:
 
     blocking = (not ex.report.ok
                 or bool(findings["invalid_triggers"]) or bool(findings["invalid_grid_states"])
-                or any(e.status == "not_mapped" for e in matrix))
+                or any(e.status == "not_mapped" and e.kind not in ADDED_KINDS for e in matrix))
     print("Tracabilite OK" if not blocking else "Tracabilite : a verifier")
     return 1 if blocking else 0
 

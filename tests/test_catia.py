@@ -137,3 +137,24 @@ def test_tracabilite_du_fichier_catia(export, catia) -> None:
 def test_nom_quote() -> None:
     assert quoted("Lounge position (180°)") == "'Lounge position (180°)'"
     assert quoted("it's") == "'it\\'s'"
+
+
+_TOP_LEVEL = re.compile(r"^ {4}(?:part def|part|item def|state def|requirement def|use case def|metadata def|view)"
+                        r" ([^\s:;{]+)", re.M)
+
+
+def test_noms_uniques_dans_le_package_catia(export, catia) -> None:
+    """Tout est dans un seul package : un user need nommé comme le use case ne doit pas créer de doublon."""
+    for f in catia.values():
+        names = _TOP_LEVEL.findall(f.text)
+        assert len(names) == len(set(names)), f.name
+    uc1 = _uc(export, 1)
+    served = sorted({r.user_need_id for r in export.step_user_needs
+                     if r.step_id in {s.step_id for s in export.steps_of(uc1.use_case_id)}})
+    needs = [u.model_copy(update={"name": uc1.name}) if u.user_need_id == served[0] else u for u in export.user_needs]
+    f = generate_catia(export.model_copy(update={"user_needs": needs}), [uc1.use_case_id], SETTINGS.generate,
+                       SETTINGS.catia)[0]
+    names = _TOP_LEVEL.findall(f.text)
+    assert len(names) == len(set(names))
+    assert "requirement def WelcomeOnBoard {" in f.text and "use case def WelcomeOnBoard2 {" in f.text
+    assert "expose WelcomeOnBoard2;" in f.text                     # la vue de flux montre bien le use case

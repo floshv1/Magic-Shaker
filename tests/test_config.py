@@ -23,6 +23,9 @@ def test_settings_par_defaut_pointent_vers_l_export() -> None:
     assert s.data_dir == s.root / "data" / "usershaker"
     assert s.out_dir == s.root / "out"
     assert (s.data_dir / "meta.csv").is_file()
+    # décisions humaines et statut des propositions LLM : versionnés, hors de out/ (effacé par make clean)
+    assert s.review_file == s.root / "review" / "decisions.json"
+    assert s.proposals_file == s.root / "review" / "llm_proposals.json"
 
 
 def test_surcharge_par_variable_d_environnement(monkeypatch, tmp_path) -> None:
