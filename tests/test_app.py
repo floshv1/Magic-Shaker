@@ -37,7 +37,7 @@ def _load(app: AppTest) -> AppTest:
 def _translate_all(app: AppTest) -> AppTest:
     _load(app)
     _ok(_button(app, "Continuer").click().run())
-    return _ok(app.button(key="translate").click().run())
+    return _ok(app.button(key="nav_translate").click().run())
 
 
 def _md(app: AppTest) -> str:
@@ -84,7 +84,7 @@ def test_rien_coche(app) -> None:
     _ok(_button(app, "Continuer").click().run())
     _ok(_button(app, "Tout décocher").click().run())
     assert any("Cochez au moins un use case" in w.value for w in app.warning)
-    assert app.button(key="translate").disabled
+    assert app.button(key="nav_translate").disabled
 
 
 def test_selection_conservee_entre_les_etapes(app) -> None:
@@ -94,7 +94,7 @@ def test_selection_conservee_entre_les_etapes(app) -> None:
     _ok(_button(app, "Retour").click().run())
     _ok(_button(app, "Continuer").click().run())
     assert app.checkbox[0].value is False and app.checkbox[1].value is True
-    assert app.button(key="translate").label == "Traduire 3 use cases"
+    assert app.button(key="nav_translate").label == "Traduire 3 use cases"
 
 
 def test_toutes_les_vues_de_diagramme(app) -> None:

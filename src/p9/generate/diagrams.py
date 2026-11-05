@@ -24,6 +24,7 @@ from .build import build_common, build_use_case, compute_common_names, use_case_
 FONT = "Helvetica"
 COLORS = {
     "part": ("#E8F0FA", "#4A6FA5"),
+    "system": ("#F7F9FC", "#2E4A7A"),
     "use_case": ("#FFF7D6", "#B08900"),
     "actor": ("#FFFFFF", "#555555"),
     "action": ("#FFFFFF", "#3C6E47"),
@@ -118,28 +119,54 @@ def _ref(doc: str, uid: str) -> str:
     return f"{doc} [UserShakerRef id = {uid}]" if uid else doc
 
 
-def _part_label(part: str, typ: str) -> dict[str, str]:
-    """Nom de la part sur le lien de composition, seulement s'il apporte quelque chose (≠ type)."""
-    return {} if part.lower() == typ.lower() else {"label": f'"{_tip(part)}"'}
-
-
 # --------------------------------------------------------------------- vues
 
+GRID_COLS = 4
+
+
 def _structure(common: dict) -> Diagram:
-    d = _Dot("structure", rankdir="LR")
+    """Vue de type « blocs imbriqués » (comme une vue générale CATIA) : le bloc `part def ESpace` contient ses
+    parts, rangées en grille ; une part qui a elle-même des parts devient un bloc imbriqué."""
+    d = _Dot("structure", rankdir="TB")
     system = common["system"]
-    d.node(f"pd_{system}", _label("part def", system), "part", f"Systeme {system} (sujet des use cases)",
-           shape="box", style='"filled,bold"')
-    for c in common["components"]:
-        extra = [f"{k} = {v}" for k, v in c["attrs"]]
-        if c["state_def"]:
-            extra.append(f"exhibit state : {c['state_def']}")
-        d.node(f"pd_{c['name']}", _label("part def", c["name"], extra), "part", _ref(c["doc"], c["id"]), shape="box")
-    for part, typ in common["system_parts"]:
-        d.edge(f"pd_{system}", f"pd_{typ}", dir="back", arrowtail="diamond", **_part_label(part, typ))
-    for c in common["components"]:
-        for part, typ in c["parts"]:
-            d.edge(f"pd_{c['name']}", f"pd_{typ}", dir="back", arrowtail="diamond", **_part_label(part, typ))
+    comps = {c["name"]: c for c in common["components"]}
+
+    def place(parts: list[tuple[str, str]], path: str, seen: frozenset[str]) -> list[str]:
+        anchors: list[str] = []          # un nœud par case de la grille (1er nœud d'un bloc imbriqué)
+        for part, typ in parts:
+            c = comps.get(typ)
+            extra = [f": {typ}"]
+            if c:
+                extra += [f"{k} = {v}" for k, v in c["attrs"]]
+                if c["state_def"]:
+                    extra.append(f"exhibit state : {c['state_def']}")
+            nid = f"p{path}_{part}"
+            tip = _ref(c["doc"], c["id"]) if c else typ
+            if c and c["parts"] and typ not in seen:            # bloc imbriqué (garde-fou contre les cycles)
+                d.open_cluster(nid, _label("part", part, extra), "part", tip)
+                inner = place(c["parts"], f"{path}_{part}", seen | {typ})
+                d.close_cluster()
+                if inner:
+                    anchors.append(inner[0])
+            else:
+                d.node(nid, _label("part", part, extra), "part", tip, width="3.4")
+                anchors.append(nid)
+        # grille : GRID_COLS blocs par ligne, lignes empilées (liens invisibles)
+        rows = [anchors[i:i + GRID_COLS] for i in range(0, len(anchors), GRID_COLS)]
+        for row in rows:
+            if len(row) > 1:
+                d.lines.append(f"{d.indent}{{ rank=same; " + " ".join(f'"{a}"' for a in row) + " }")
+                for a, b in zip(row, row[1:]):
+                    d.lines.append(f'{d.indent}"{a}" -> "{b}" [style=invis];')
+        for upper, lower in zip(rows, rows[1:]):
+            for a, b in zip(upper, lower):
+                d.lines.append(f'{d.indent}"{a}" -> "{b}" [style=invis];')
+        return anchors
+
+    d.open_cluster("system", _label("part def", system, [f"{len(common['system_parts'])} parts"]), "system",
+                   f"Systeme {system} (sujet des use cases) et ses parts")
+    place(common["system_parts"], "", frozenset({system}))
+    d.close_cluster()
     return d.done(f"Structure : part def {system}")
 
 

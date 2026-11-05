@@ -58,5 +58,8 @@ def test_requirements_optionnels(export) -> None:
 def test_use_cases_et_structure(export) -> None:
     d = build_diagrams(export)
     assert d.use_cases.dot.count("«use case def»") == len(export.use_cases)
-    assert d.structure.dot.count("«part def»") == len(export.components) + 1
+    # bloc ESpace qui contient ses parts (aucun lien visible : grille)
+    assert d.structure.dot.count("«part def»") == 1 and 'subgraph "cluster_system"' in d.structure.dot
+    assert d.structure.dot.count("«part»") == len(export.components)
+    assert d.structure.edges == 0 and "style=invis" in d.structure.dot
     assert sum(v.transitions for v in d.states.values()) > 0      # transitions déduites

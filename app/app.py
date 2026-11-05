@@ -118,6 +118,10 @@ h1,h2,h3{letter-spacing:-0.01em}
   background:var(--surface)}
 .p9-phases{font-size:13px;color:var(--ink-soft)}
 
+/* boutons de navigation : un bouton resté d'une étape précédente pendant le rechargement (élément
+   « périmé » de Streamlit) n'a plus de sens, on le masque au lieu de l'afficher grisé */
+[data-testid="stElementContainer"][data-stale="true"][class*="st-key-nav_"]{display:none}
+
 /* barre d'action */
 [class*="st-key-actionbar"]{border-top:1px solid var(--line);padding-top:16px;margin-top:10px}
 
@@ -407,46 +411,47 @@ def _controls_detail(rep) -> None:
 
 
 if step == 1:
-    if not usable:
-        html("<p class='p9-lead'>Importez l'export UserShaker</p>"
-             "<p class='p9-sub'>Déposez le fichier .zip téléchargé depuis UserShaker. Les CSV sont lus et "
-             "contrôlés, rien n'est modifié.</p>")
-        st.file_uploader("Fichier .zip de l'export", type=["zip"], key="upload", on_change=_on_upload,
-                         label_visibility="collapsed")
-        c = st.columns([1.3, 3])
-        c[0].button("Utiliser l'export de démonstration", on_click=_use_repo, width="stretch",
-                    help=f"Charge l'export rangé dans {SETTINGS.data_dir.relative_to(SETTINGS.root).as_posix()}")
-        if load_error:
-            st.error(load_error)
-        elif ex is not None and ex.report.missing_required:
-            st.error("Cet export est incomplet : il manque " + ", ".join(ex.report.missing_required)
-                     + f". Un export doit contenir au moins {', '.join(REQUIRED_SHEETS)}.")
+    with st.container(key="stepbody_1"):   # nouveau bloc à chaque étape : rien ne reste de la précédente
+        if not usable:
+            html("<p class='p9-lead'>Importez l'export UserShaker</p>"
+                 "<p class='p9-sub'>Déposez le fichier .zip téléchargé depuis UserShaker. Les CSV sont lus et "
+                 "contrôlés, rien n'est modifié.</p>")
+            st.file_uploader("Fichier .zip de l'export", type=["zip"], key="upload", on_change=_on_upload,
+                             label_visibility="collapsed")
+            c = st.columns([1.3, 3])
+            c[0].button("Utiliser l'export de démonstration", on_click=_use_repo, width="stretch", key="nav_demo",
+                        help=f"Charge l'export rangé dans {SETTINGS.data_dir.relative_to(SETTINGS.root).as_posix()}")
+            if load_error:
+                st.error(load_error)
+            elif ex is not None and ex.report.missing_required:
+                st.error("Cet export est incomplet : il manque " + ", ".join(ex.report.missing_required)
+                         + f". Un export doit contenir au moins {', '.join(REQUIRED_SHEETS)}.")
+            else:
+                html("<div class='p9-hint'>En attente d'un fichier .zip. Pas d'export sous la main ? "
+                     "Utilisez l'export de démonstration.</div>")
         else:
-            html("<div class='p9-hint'>En attente d'un fichier .zip. Pas d'export sous la main ? "
-                 "Utilisez l'export de démonstration.</div>")
-    else:
-        rep = ex.report
-        meta = ex.meta
-        html(f"<p class='p9-lead'>{escape(meta.project_name or 'Export chargé')}</p>"
-             f"<p class='p9-sub'>Exporté le {escape((meta.exported_at or '?')[:10])} par "
-             f"{escape(meta.company_name or '?')}, schéma {escape(meta.schema_version or '?')}.</p>")
-        html("<div class='p9-facts'>"
-             f"<div><b>{len(ex.use_cases)}</b><span>use cases</span></div>"
-             f"<div><b>{len(ex.steps)}</b><span>steps</span></div>"
-             f"<div><b>{len(ex.personas)}</b><span>personas</span></div>"
-             f"<div><b>{len(ex.components)}</b><span>composants</span></div>"
-             f"<div><b>{len(ex.user_needs)}</b><span>user needs</span></div></div>")
-        if rep.ok:
-            html("<div class='p9-check'><i>✓</i>Contrôles OK : les comptes correspondent à meta.csv et toutes "
-                 "les clés étrangères pointent vers un id existant.</div>")
-        else:
-            html("<div class='p9-check warn'><i>!</i>Certains contrôles sont à vérifier : voir le détail.</div>")
-        with st.expander("Détail des contrôles", expanded=not rep.ok):
-            _controls_detail(rep)
-        with st.container(key="actionbar_1"):
-            a = st.columns([1.2, 3, 1.6])
-            a[0].button("Changer de fichier", on_click=_reset, width="stretch")
-            a[2].button("Continuer", on_click=go, args=(2,), type="primary", width="stretch")
+            rep = ex.report
+            meta = ex.meta
+            html(f"<p class='p9-lead'>{escape(meta.project_name or 'Export chargé')}</p>"
+                 f"<p class='p9-sub'>Exporté le {escape((meta.exported_at or '?')[:10])} par "
+                 f"{escape(meta.company_name or '?')}, schéma {escape(meta.schema_version or '?')}.</p>")
+            html("<div class='p9-facts'>"
+                 f"<div><b>{len(ex.use_cases)}</b><span>use cases</span></div>"
+                 f"<div><b>{len(ex.steps)}</b><span>steps</span></div>"
+                 f"<div><b>{len(ex.personas)}</b><span>personas</span></div>"
+                 f"<div><b>{len(ex.components)}</b><span>composants</span></div>"
+                 f"<div><b>{len(ex.user_needs)}</b><span>user needs</span></div></div>")
+            if rep.ok:
+                html("<div class='p9-check'><i>✓</i>Contrôles OK : les comptes correspondent à meta.csv et toutes "
+                     "les clés étrangères pointent vers un id existant.</div>")
+            else:
+                html("<div class='p9-check warn'><i>!</i>Certains contrôles sont à vérifier : voir le détail.</div>")
+            with st.expander("Détail des contrôles", expanded=not rep.ok):
+                _controls_detail(rep)
+            with st.container(key="actionbar_1"):
+                a = st.columns([1.2, 3, 1.6])
+                a[0].button("Changer de fichier", on_click=_reset, width="stretch", key="nav_reset")
+                a[2].button("Continuer", on_click=go, args=(2,), type="primary", width="stretch", key="nav_continue")
 
 
 # ============================================================ 2. choisir
@@ -491,27 +496,28 @@ def _uc_row(u) -> None:
 
 
 if step == 2:
-    for u in summaries:                           # l'état des cases survit au changement d'étape
-        st.session_state[f"sel_{u.use_case_id}"] = sel_store.get(u.use_case_id, True)
-    html("<p class='p9-lead'>Choisissez les use cases à traduire</p>"
-         "<p class='p9-sub'>Chaque use case devient un fichier .sysml. Les éléments partagés (personas, "
-         "composants, besoins) vont dans un fichier commun.</p>")
-    head = st.columns([1, 1, 2.4, 1.6], vertical_alignment="center")
-    head[0].button("Tout cocher", on_click=_select_all, args=(True,), width="stretch")
-    head[1].button("Tout décocher", on_click=_select_all, args=(False,), width="stretch")
-    head[3].button(f"Traduire {plural(len(selected), 'use case')}", on_click=_translate, type="primary",
-                   disabled=not selected, width="stretch", key="translate_top")
-    for u in summaries:
-        _uc_row(u)
-    with st.container(key="actionbar_2"):
-        a = st.columns([1.2, 3, 1.6], vertical_alignment="center")
-        a[0].button("Retour", on_click=go, args=(1,), width="stretch")
-        if not selected:
-            a[1].warning("Cochez au moins un use case.")
-        elif translated and translated != selected:
-            a[1].caption("La sélection a changé depuis la dernière traduction.")
-        a[2].button(f"Traduire {plural(len(selected), 'use case')}", on_click=_translate, type="primary",
-                    disabled=not selected, width="stretch", key="translate")
+    with st.container(key="stepbody_2"):   # nouveau bloc à chaque étape : rien ne reste de la précédente
+        for u in summaries:                           # l'état des cases survit au changement d'étape
+            st.session_state[f"sel_{u.use_case_id}"] = sel_store.get(u.use_case_id, True)
+        html("<p class='p9-lead'>Choisissez les use cases à traduire</p>"
+             "<p class='p9-sub'>Chaque use case devient un fichier .sysml. Les éléments partagés (personas, "
+             "composants, besoins) vont dans un fichier commun.</p>")
+        head = st.columns([1, 1, 2.4, 1.6], vertical_alignment="center")
+        head[0].button("Tout cocher", on_click=_select_all, args=(True,), width="stretch")
+        head[1].button("Tout décocher", on_click=_select_all, args=(False,), width="stretch")
+        head[3].button(f"Traduire {plural(len(selected), 'use case')}", on_click=_translate, type="primary",
+                       disabled=not selected, width="stretch", key="nav_translate_top")
+        for u in summaries:
+            _uc_row(u)
+        with st.container(key="actionbar_2"):
+            a = st.columns([1.2, 3, 1.6], vertical_alignment="center")
+            a[0].button("Retour", on_click=go, args=(1,), width="stretch", key="nav_back")
+            if not selected:
+                a[1].warning("Cochez au moins un use case.")
+            elif translated and translated != selected:
+                a[1].caption("La sélection a changé depuis la dernière traduction.")
+            a[2].button(f"Traduire {plural(len(selected), 'use case')}", on_click=_translate, type="primary",
+                        disabled=not selected, width="stretch", key="nav_translate")
 
 
 # ============================================================ 3. résultats
@@ -755,246 +761,247 @@ def _review_card(item) -> None:
 
 
 if step == 3:
-    store = load_store(PROPOSALS_PATH)
-    accepted = ProposalStore(proposals=store.accepted())
-    review = load_review(SETTINGS.review_file)
-    review_json = review.model_dump_json()
-    gen, matrix, cov, trace_csv = cached_generate(
-        f"{export_key}|{'|'.join(translated)}|{hashlib.sha256(review_json.encode()).hexdigest()}", ex, translated,
-        accepted.model_dump_json(), review_json)
-    catia_files = cached_catia(f"{export_key}|{'|'.join(translated)}", ex, translated)
-    findings = cached_findings(export_key, ex)
-    rv_state = review_state(findings, review)
-    n_open = rv_state.total - rv_state.done
+    with st.container(key="stepbody_3"):   # nouveau bloc à chaque étape : rien ne reste de la précédente
+        store = load_store(PROPOSALS_PATH)
+        accepted = ProposalStore(proposals=store.accepted())
+        review = load_review(SETTINGS.review_file)
+        review_json = review.model_dump_json()
+        gen, matrix, cov, trace_csv = cached_generate(
+            f"{export_key}|{'|'.join(translated)}|{hashlib.sha256(review_json.encode()).hexdigest()}", ex, translated,
+            accepted.model_dump_json(), review_json)
+        catia_files = cached_catia(f"{export_key}|{'|'.join(translated)}", ex, translated)
+        findings = cached_findings(export_key, ex)
+        rv_state = review_state(findings, review)
+        n_open = rv_state.total - rv_state.done
 
-    head = st.columns([3, 1.3, 1.6], vertical_alignment="bottom")
-    with head[0]:
-        names = ", ".join(f"UC{by_id[i].position}" for i in translated if i in by_id)
-        html(f"<p class='p9-lead'>Votre modèle SysML v2 est prêt</p>"
-             f"<p class='p9-sub'>{plural(len(translated), 'use case traduit', 'use cases traduits')} ({names}), "
-             f"{plural(len(gen.files), 'fichier')} .sysml.</p>")
-    head[1].button("Modifier la sélection", on_click=go, args=(2,), width="stretch")
-    bundle = dict(gen.files)
-    bundle["traceability.csv"] = trace_csv
-    if review.decisions:
-        bundle["review/decisions.json"] = review_json_pretty(review)
-        bundle["review/review.csv"] = review_csv(review)
-    bundle.update({f"catia/{f.name}": f.text for f in catia_files})
-    head[2].download_button("Télécharger le modèle (.zip)", make_zip(bundle), file_name="sysml_export.zip",
-                            mime="application/zip", type="primary", width="stretch",
-                            help="Fichiers .sysml (commun + un par use case), traceability.csv, et catia/ : "
-                                 "un fichier autonome par use case pour CATIA Community")
-    if translated != selected:
-        st.info("La sélection a changé depuis cette traduction. Revenez à l'étape Choisir pour traduire à nouveau.")
-    _ledger(matrix)
+        head = st.columns([3, 1.3, 1.6], vertical_alignment="bottom")
+        with head[0]:
+            names = ", ".join(f"UC{by_id[i].position}" for i in translated if i in by_id)
+            html(f"<p class='p9-lead'>Votre modèle SysML v2 est prêt</p>"
+                 f"<p class='p9-sub'>{plural(len(translated), 'use case traduit', 'use cases traduits')} ({names}), "
+                 f"{plural(len(gen.files), 'fichier')} .sysml.</p>")
+        head[1].button("Modifier la sélection", on_click=go, args=(2,), width="stretch", key="nav_modify")
+        bundle = dict(gen.files)
+        bundle["traceability.csv"] = trace_csv
+        if review.decisions:
+            bundle["review/decisions.json"] = review_json_pretty(review)
+            bundle["review/review.csv"] = review_csv(review)
+        bundle.update({f"catia/{f.name}": f.text for f in catia_files})
+        head[2].download_button("Télécharger le modèle (.zip)", make_zip(bundle), file_name="sysml_export.zip",
+                                mime="application/zip", type="primary", width="stretch",
+                                help="Fichiers .sysml (commun + un par use case), traceability.csv, et catia/ : "
+                                     "un fichier autonome par use case pour CATIA Community")
+        if translated != selected:
+            st.info("La sélection a changé depuis cette traduction. Revenez à l'étape Choisir pour traduire à nouveau.")
+        _ledger(matrix)
 
-    # libellés fixes : un libellé qui change (compteur) ferait perdre l'onglet ouvert à Streamlit
-    labels = RESULT_TABS
-    if n_open:
-        st.caption(f"{plural(n_open, 'point')} à valider sur {rv_state.total} : onglet « Points à valider ».")
-    t_diag, t_files, t_review, t_chat = st.tabs(labels, key="result_tab", on_change="rerun")
+        # libellés fixes : un libellé qui change (compteur) ferait perdre l'onglet ouvert à Streamlit
+        labels = RESULT_TABS
+        if n_open:
+            st.caption(f"{plural(n_open, 'point')} à valider sur {rv_state.total} : onglet « Points à valider ».")
+        t_diag, t_files, t_review, t_chat = st.tabs(labels, key="result_tab", on_change="rerun")
 
-    # ---------------------------------------------------------------- diagrammes
-    if t_diag.open:
-        with t_diag:
-            ctl = st.columns([2.4, 2.2, 1.3], vertical_alignment="bottom")
-            kind = ctl[0].segmented_control("Vue", ["Activité", "Use cases", "Structure", "Machine à états"],
-                                            key=persist("diag_kind", "Activité"), on_change=remember,
-                                            args=("diag_kind",)) or "Activité"
-            with_reqs = True
-            if kind == "Activité":
-                with_reqs = ctl[2].toggle("Besoins servis", key=persist("diag_reqs", True), on_change=remember,
-                                          args=("diag_reqs",))
-            diagrams = cached_diagrams(f"{export_key}|{'|'.join(translated)}|{with_reqs}", ex, translated, with_reqs)
-            if kind == "Structure":
-                view = diagrams.structure
-            elif kind == "Use cases":
-                view = diagrams.use_cases
-            elif kind == "Activité":
-                pkgs = list(diagrams.activities)
-                if st.session_state.get("diag_uc") not in pkgs:
-                    st.session_state.pop("diag_uc", None)
-                    st.session_state.get("_ui", {}).pop("diag_uc", None)
-                uc = ctl[1].selectbox("Use case", pkgs, key=persist("diag_uc", pkgs[0]), on_change=remember,
-                                      args=("diag_uc",))
-                view = diagrams.activities[uc]
-            else:
-                active = [n for n, d in diagrams.states.items() if d.transitions]
-                choices = active or list(diagrams.states)
-                if st.session_state.get("diag_sd") not in choices:
-                    st.session_state.pop("diag_sd", None)
-                    st.session_state.get("_ui", {}).pop("diag_sd", None)
-                sd = ctl[1].selectbox("Composant", choices, key=persist("diag_sd", choices[0]), on_change=remember,
-                                      args=("diag_sd",),
-                                      format_func=lambda n: f"{n} ({plural(diagrams.states[n].transitions, 'transition')})")
-                view = diagrams.states[sd]
-            diagram_viewer(view)
-            st.caption("Aperçu dessiné depuis le modèle généré, avec les mêmes noms que les fichiers .sysml. "
-                       "Survolez un bloc pour voir son texte d'origine et son id UserShaker. La mise en page "
-                       "définitive se fait dans CATIA Magic après import.")
-
-    # ---------------------------------------------------------------- fichiers
-    if t_files.open:
-        with t_files:
-            st.markdown("**Couverture des use cases traduits**")
-            st.dataframe(pd.DataFrame([{"élément": r.element, "dans l'export": r.in_export, "traduit": r.translated,
-                                        "couverture": r.percent_label, "note": r.note} for r in cov]),
-                         hide_index=True, width="stretch")
-            tabs = st.tabs(list(gen.files))
-            for tab, (name, src) in zip(tabs, gen.files.items()):
-                with tab:
-                    st.download_button(f"Télécharger {name}", src.encode("utf-8"), file_name=name,
-                                       mime="text/plain", key=f"dl_{name}")
-                    st.code(src, language=None, line_numbers=True, height=480)
-            st.markdown("**Pour CATIA Magic Community**")
-            st.caption(f"L'éditeur textuel de l'édition gratuite refuse plus de {SETTINGS.catia.char_limit:,} "
-                       "caractères : un fichier autonome par use case, à coller dans l'éditeur textuel d'un nouveau "
-                       "projet puis Alt+S (affichage des vues : voir le README). Ce qui est laissé de côté est noté "
-                       "par `make trace`.")
-            for f in catia_files:
-                left, right = st.columns([2, 3], vertical_alignment="center")
-                left.download_button(f"Télécharger {f.name}", f.text.encode("utf-8"), file_name=f.name,
-                                     mime="text/plain", key=f"dl_catia_{f.name}", width="stretch")
-                right.caption(f"{f.chars:,} / {SETTINGS.catia.char_limit:,} caractères"
-                              + (f" · réductions : {', '.join(f.trims)}" if f.trims else " · aucune réduction"))
-            with st.expander(f"Matrice de traçabilité complète ({len(matrix)} lignes)"):
-                df = pd.DataFrame([e.model_dump() for e in matrix])
-                status = st.multiselect("Statut", ["mapped", "partial", "not_mapped"],
-                                        default=["mapped", "partial", "not_mapped"])
-                st.dataframe(df[df.status.isin(status)], hide_index=True, width="stretch")
-            with st.expander("Vérifier la syntaxe avec le parseur OMG SysML v2"):
-                if not sysml_parser.is_installed():
-                    st.caption("Parseur OMG non installé : lancez `make validate-setup` une fois.")
-                elif st.button("Lancer la vérification"):
-                    try:
-                        res = run_live("Vérification par le parseur OMG SysML v2", "omg",
-                                       lambda ev: sysml_parser.validate_texts(
-                                           gen.files, SETTINGS.out_dir / "ui-validate", on_event=ev))
-                    except Exception as e:
-                        st.error(f"Vérification impossible : {e}")
-                    else:
-                        if res.ok:
-                            st.success(f"Les {len(res.files)} fichiers passent le parseur OMG, sans erreur.")
-                        else:
-                            st.error(f"{sum(f.errors for f in res.files)} erreur(s) OMG")
-                            st.dataframe(pd.DataFrame([i.model_dump() for i in res.issues]), hide_index=True,
-                                         width="stretch")
-
-    # ---------------------------------------------------------------- points à valider (+ propositions LLM)
-    if t_review.open:
-        with t_review:
-            st.caption("Règles Python fixes appliquées à l'export, sans LLM : le résultat est le même à chaque "
-                       "lancement. Elles repèrent ce que le modèle SysML ne peut pas représenter tel quel. "
-                       "Pour chaque point, c'est vous qui décidez : ajouter la garde ou le requirement qui manque, "
-                       "rattacher à un besoin existant, renvoyer la correction à UserShaker, ou écarter le point. "
-                       "Les décisions sont signées, enregistrées dans review/decisions.json et générées dans un "
-                       "package séparé (origin = \"human\").")
-            top = st.columns([1.4, 2.6], vertical_alignment="bottom")
-            top[0].text_input("Votre nom (enregistré avec chaque décision)", key=persist("rv_author", ""),
-                              on_change=remember, args=("rv_author",), placeholder="Prénom Nom")
-            with top[1]:
-                st.progress(rv_state.done / rv_state.total if rv_state.total else 1.0,
-                            text=f"{rv_state.done} / {rv_state.total} points traités")
-            for check, title, why, empty in REVIEW_SECTIONS:
-                rows = rv_state.items.get(check, [])
-                st.markdown(f"##### {title} ({len(rows)})")
-                st.caption(why)
-                html("<div class='p9-rules'><span>Règle appliquée</span><ol>"
-                     + "".join(f"<li>{escape(r)}</li>" for r in CHECK_RULES.get(check, [])) + "</ol></div>")
-                if not rows:
-                    st.caption(empty)
-                for item in rows:
-                    _review_card(item)
-            if rv_state.orphans:
-                with st.expander(f"Décisions dont le point n'est plus détecté ({len(rv_state.orphans)})"):
-                    st.caption("L'export a changé et ces points ne sont plus signalés. La décision est gardée tant "
-                               "que vous ne la supprimez pas, mais elle n'est plus appliquée à la traçabilité.")
-                    for d in rv_state.orphans:
-                        o1, o2 = st.columns([4, 1], vertical_alignment="center")
-                        o1.markdown(f"**{ACTION_LABELS[d.action]}** par {d.author} le {d.decided_at} : "
-                                    f"{d.finding_message or d.finding_id}")
-                        o2.button("Supprimer", key=f"rv_orph_{d.finding_id}", on_click=_undo_decision,
-                                  args=(d.finding_id,), width="stretch")
-            with st.expander("Autres contrôles (informatifs)"):
-                _findings_block("User needs non couverts", "uncovered_needs", "Tous les user needs sont servis.")
-                _findings_block("États jamais atteints", "unreachable_states", "Tous les états sont atteints.")
-                _findings_block("Triggers invalides", "invalid_triggers", "Aucun.")
-
-            st.divider()
-            st.markdown("##### Propositions du LLM")
-            st.caption("Le LLM propose, l'humain valide. Seules les propositions acceptées entrent dans le "
-                       "modèle, dans un fichier séparé, et restent marquées `origin = \"llm\"`. Données envoyées : "
-                       "uniquement les points ci-dessus et le nom des éléments voisins (ni biographies, ni images).")
-            llm_ok, llm_label = provider_status(SETTINGS.llm)
-            st.markdown(f"Fournisseur : **{llm_label}**" if llm_ok else f"⚠️ {llm_label}")
-
-            if st.button("Générer des propositions", disabled=not llm_ok):
-                try:
-                    provider, tctx = make_provider(SETTINGS.llm), cached_tool_context(export_key, ex)
-                    res = run_live("Le LLM analyse les points à valider", llm_key("enrich"),
-                                   lambda ev: enrich(provider, tctx, on_event=ev))
-                except LlmUnavailable as e:
-                    st.error(str(e))
+        # ---------------------------------------------------------------- diagrammes
+        if t_diag.open:
+            with t_diag:
+                ctl = st.columns([2.4, 2.2, 1.3], vertical_alignment="bottom")
+                kind = ctl[0].segmented_control("Vue", ["Activité", "Use cases", "Structure", "Machine à états"],
+                                                key=persist("diag_kind", "Activité"), on_change=remember,
+                                                args=("diag_kind",)) or "Activité"
+                with_reqs = True
+                if kind == "Activité":
+                    with_reqs = ctl[2].toggle("Besoins servis", key=persist("diag_reqs", True), on_change=remember,
+                                              args=("diag_reqs",))
+                diagrams = cached_diagrams(f"{export_key}|{'|'.join(translated)}|{with_reqs}", ex, translated, with_reqs)
+                if kind == "Structure":
+                    view = diagrams.structure
+                elif kind == "Use cases":
+                    view = diagrams.use_cases
+                elif kind == "Activité":
+                    pkgs = list(diagrams.activities)
+                    if st.session_state.get("diag_uc") not in pkgs:
+                        st.session_state.pop("diag_uc", None)
+                        st.session_state.get("_ui", {}).pop("diag_uc", None)
+                    uc = ctl[1].selectbox("Use case", pkgs, key=persist("diag_uc", pkgs[0]), on_change=remember,
+                                          args=("diag_uc",))
+                    view = diagrams.activities[uc]
                 else:
-                    store.merge(res.proposals)
-                    save_store(store, PROPOSALS_PATH)
-                    st.success(f"{len(res.proposals)} proposition(s) reçue(s)"
-                               + (f", {len(res.invalid)} écartée(s) automatiquement (ids inconnus ou "
-                                  "format invalide)" if res.invalid else ""))
+                    active = [n for n, d in diagrams.states.items() if d.transitions]
+                    choices = active or list(diagrams.states)
+                    if st.session_state.get("diag_sd") not in choices:
+                        st.session_state.pop("diag_sd", None)
+                        st.session_state.get("_ui", {}).pop("diag_sd", None)
+                    sd = ctl[1].selectbox("Composant", choices, key=persist("diag_sd", choices[0]), on_change=remember,
+                                          args=("diag_sd",),
+                                          format_func=lambda n: f"{n} ({plural(diagrams.states[n].transitions, 'transition')})")
+                    view = diagrams.states[sd]
+                diagram_viewer(view)
+                st.caption("Aperçu dessiné depuis le modèle généré, avec les mêmes noms que les fichiers .sysml. "
+                           "Survolez un bloc pour voir son texte d'origine et son id UserShaker. La mise en page "
+                           "définitive se fait dans CATIA Magic après import.")
 
-            valid_ids = {s.step_id for s in ex.steps} | {f.feedback_id for f in ex.persona_step_feedback} | \
-                        {u.user_need_id for u in ex.user_needs} | {u.use_case_id for u in ex.use_cases} | \
-                        {p.persona_id for p in ex.personas}
-            shown = [p for p in store.proposals if all(t in valid_ids for t in p.target_ids)]
-            if not shown:
-                st.caption("Aucune proposition pour cet export.")
-            for p in shown:
-                with st.container(border=True):
-                    st.markdown(badges(p.kind, p.status, f"origin = {p.origin}"), unsafe_allow_html=True)
-                    st.markdown(f"**{p.title}**  \n{p.text}")
-                    html(f"<span class='muted'>{escape(p.rationale)}</span><br>"
-                         f"<span class='ids'>cibles : {' · '.join(p.target_ids)} · id {p.proposal_id}</span>")
-                    b1, b2, _ = st.columns([1, 1, 1.5])
-                    b1.button("Accepter", key=f"acc_{p.proposal_id}", on_click=_decide,
-                              args=(p.proposal_id, "accepted"), disabled=p.status == "accepted",
-                              type="primary", width="stretch")
-                    b2.button("Rejeter", key=f"rej_{p.proposal_id}", on_click=_decide,
-                              args=(p.proposal_id, "rejected"), disabled=p.status == "rejected", width="stretch")
-
-    # ---------------------------------------------------------------- assistant (chat)
-    if t_chat.open:
-        with t_chat:
-            st.caption("L'assistant ne répond jamais de mémoire : il interroge le modèle via des outils "
-                       "(uncovered_needs, constraints_in_text_only, find_element…) et cite les ids.")
-            llm_ok, llm_label = provider_status(SETTINGS.llm)
-            if not llm_ok:
-                st.info(llm_label)
-            else:
-                hist_key = f"chat_{export_key}"
-                history = st.session_state.setdefault(hist_key, [])
-                for turn in history:
-                    with st.chat_message(turn["role"]):
-                        st.markdown(turn["content"])
-                        if turn.get("tools"):
-                            st.caption("Outils appelés : " + ", ".join(turn["tools"]))
-                question = st.chat_input("Ex. : quels besoins implicites ne sont couverts par aucun user need ?")
-                if question:
-                    with st.chat_message("user"):
-                        st.markdown(question)
-                    with st.chat_message("assistant"):
+        # ---------------------------------------------------------------- fichiers
+        if t_files.open:
+            with t_files:
+                st.markdown("**Couverture des use cases traduits**")
+                st.dataframe(pd.DataFrame([{"élément": r.element, "dans l'export": r.in_export, "traduit": r.translated,
+                                            "couverture": r.percent_label, "note": r.note} for r in cov]),
+                             hide_index=True, width="stretch")
+                tabs = st.tabs(list(gen.files))
+                for tab, (name, src) in zip(tabs, gen.files.items()):
+                    with tab:
+                        st.download_button(f"Télécharger {name}", src.encode("utf-8"), file_name=name,
+                                           mime="text/plain", key=f"dl_{name}")
+                        st.code(src, language=None, line_numbers=True, height=480)
+                st.markdown("**Pour CATIA Magic Community**")
+                st.caption(f"L'éditeur textuel de l'édition gratuite refuse plus de {SETTINGS.catia.char_limit:,} "
+                           "caractères : un fichier autonome par use case, à coller dans l'éditeur textuel d'un nouveau "
+                           "projet puis Alt+S (affichage des vues : voir le README). Ce qui est laissé de côté est noté "
+                           "par `make trace`.")
+                for f in catia_files:
+                    left, right = st.columns([2, 3], vertical_alignment="center")
+                    left.download_button(f"Télécharger {f.name}", f.text.encode("utf-8"), file_name=f.name,
+                                         mime="text/plain", key=f"dl_catia_{f.name}", width="stretch")
+                    right.caption(f"{f.chars:,} / {SETTINGS.catia.char_limit:,} caractères"
+                                  + (f" · réductions : {', '.join(f.trims)}" if f.trims else " · aucune réduction"))
+                with st.expander(f"Matrice de traçabilité complète ({len(matrix)} lignes)"):
+                    df = pd.DataFrame([e.model_dump() for e in matrix])
+                    status = st.multiselect("Statut", ["mapped", "partial", "not_mapped"],
+                                            default=["mapped", "partial", "not_mapped"])
+                    st.dataframe(df[df.status.isin(status)], hide_index=True, width="stretch")
+                with st.expander("Vérifier la syntaxe avec le parseur OMG SysML v2"):
+                    if not sysml_parser.is_installed():
+                        st.caption("Parseur OMG non installé : lancez `make validate-setup` une fois.")
+                    elif st.button("Lancer la vérification"):
                         try:
-                            past = [{"role": t["role"], "content": t["content"]} for t in history]
-                            provider, tctx = make_provider(SETTINGS.llm), cached_tool_context(export_key, ex)
-                            ans = run_live("L'assistant interroge le modèle", llm_key("chat"),
-                                           lambda ev: ask(provider, tctx, question, past, on_event=ev))
-                        except LlmUnavailable as e:
-                            st.error(str(e))
-                            st.stop()
-                        st.markdown(ans.text)
-                        tools = [c["name"] for c in ans.tool_calls]
-                        if tools:
-                            st.caption("Outils appelés : " + ", ".join(tools))
-                        if ans.unknown_ids:
-                            st.warning("Ids cités introuvables dans l'export : " + ", ".join(ans.unknown_ids))
-                    history += [{"role": "user", "content": question},
-                                {"role": "assistant", "content": ans.text, "tools": tools}]
+                            res = run_live("Vérification par le parseur OMG SysML v2", "omg",
+                                           lambda ev: sysml_parser.validate_texts(
+                                               gen.files, SETTINGS.out_dir / "ui-validate", on_event=ev))
+                        except Exception as e:
+                            st.error(f"Vérification impossible : {e}")
+                        else:
+                            if res.ok:
+                                st.success(f"Les {len(res.files)} fichiers passent le parseur OMG, sans erreur.")
+                            else:
+                                st.error(f"{sum(f.errors for f in res.files)} erreur(s) OMG")
+                                st.dataframe(pd.DataFrame([i.model_dump() for i in res.issues]), hide_index=True,
+                                             width="stretch")
+
+        # ---------------------------------------------------------------- points à valider (+ propositions LLM)
+        if t_review.open:
+            with t_review:
+                st.caption("Règles Python fixes appliquées à l'export, sans LLM : le résultat est le même à chaque "
+                           "lancement. Elles repèrent ce que le modèle SysML ne peut pas représenter tel quel. "
+                           "Pour chaque point, c'est vous qui décidez : ajouter la garde ou le requirement qui manque, "
+                           "rattacher à un besoin existant, renvoyer la correction à UserShaker, ou écarter le point. "
+                           "Les décisions sont signées, enregistrées dans review/decisions.json et générées dans un "
+                           "package séparé (origin = \"human\").")
+                top = st.columns([1.4, 2.6], vertical_alignment="bottom")
+                top[0].text_input("Votre nom (enregistré avec chaque décision)", key=persist("rv_author", ""),
+                                  on_change=remember, args=("rv_author",), placeholder="Prénom Nom")
+                with top[1]:
+                    st.progress(rv_state.done / rv_state.total if rv_state.total else 1.0,
+                                text=f"{rv_state.done} / {rv_state.total} points traités")
+                for check, title, why, empty in REVIEW_SECTIONS:
+                    rows = rv_state.items.get(check, [])
+                    st.markdown(f"##### {title} ({len(rows)})")
+                    st.caption(why)
+                    html("<div class='p9-rules'><span>Règle appliquée</span><ol>"
+                         + "".join(f"<li>{escape(r)}</li>" for r in CHECK_RULES.get(check, [])) + "</ol></div>")
+                    if not rows:
+                        st.caption(empty)
+                    for item in rows:
+                        _review_card(item)
+                if rv_state.orphans:
+                    with st.expander(f"Décisions dont le point n'est plus détecté ({len(rv_state.orphans)})"):
+                        st.caption("L'export a changé et ces points ne sont plus signalés. La décision est gardée tant "
+                                   "que vous ne la supprimez pas, mais elle n'est plus appliquée à la traçabilité.")
+                        for d in rv_state.orphans:
+                            o1, o2 = st.columns([4, 1], vertical_alignment="center")
+                            o1.markdown(f"**{ACTION_LABELS[d.action]}** par {d.author} le {d.decided_at} : "
+                                        f"{d.finding_message or d.finding_id}")
+                            o2.button("Supprimer", key=f"rv_orph_{d.finding_id}", on_click=_undo_decision,
+                                      args=(d.finding_id,), width="stretch")
+                with st.expander("Autres contrôles (informatifs)"):
+                    _findings_block("User needs non couverts", "uncovered_needs", "Tous les user needs sont servis.")
+                    _findings_block("États jamais atteints", "unreachable_states", "Tous les états sont atteints.")
+                    _findings_block("Triggers invalides", "invalid_triggers", "Aucun.")
+
+                st.divider()
+                st.markdown("##### Propositions du LLM")
+                st.caption("Le LLM propose, l'humain valide. Seules les propositions acceptées entrent dans le "
+                           "modèle, dans un fichier séparé, et restent marquées `origin = \"llm\"`. Données envoyées : "
+                           "uniquement les points ci-dessus et le nom des éléments voisins (ni biographies, ni images).")
+                llm_ok, llm_label = provider_status(SETTINGS.llm)
+                st.markdown(f"Fournisseur : **{llm_label}**" if llm_ok else f"⚠️ {llm_label}")
+
+                if st.button("Générer des propositions", disabled=not llm_ok):
+                    try:
+                        provider, tctx = make_provider(SETTINGS.llm), cached_tool_context(export_key, ex)
+                        res = run_live("Le LLM analyse les points à valider", llm_key("enrich"),
+                                       lambda ev: enrich(provider, tctx, on_event=ev))
+                    except LlmUnavailable as e:
+                        st.error(str(e))
+                    else:
+                        store.merge(res.proposals)
+                        save_store(store, PROPOSALS_PATH)
+                        st.success(f"{len(res.proposals)} proposition(s) reçue(s)"
+                                   + (f", {len(res.invalid)} écartée(s) automatiquement (ids inconnus ou "
+                                      "format invalide)" if res.invalid else ""))
+
+                valid_ids = {s.step_id for s in ex.steps} | {f.feedback_id for f in ex.persona_step_feedback} | \
+                            {u.user_need_id for u in ex.user_needs} | {u.use_case_id for u in ex.use_cases} | \
+                            {p.persona_id for p in ex.personas}
+                shown = [p for p in store.proposals if all(t in valid_ids for t in p.target_ids)]
+                if not shown:
+                    st.caption("Aucune proposition pour cet export.")
+                for p in shown:
+                    with st.container(border=True):
+                        st.markdown(badges(p.kind, p.status, f"origin = {p.origin}"), unsafe_allow_html=True)
+                        st.markdown(f"**{p.title}**  \n{p.text}")
+                        html(f"<span class='muted'>{escape(p.rationale)}</span><br>"
+                             f"<span class='ids'>cibles : {' · '.join(p.target_ids)} · id {p.proposal_id}</span>")
+                        b1, b2, _ = st.columns([1, 1, 1.5])
+                        b1.button("Accepter", key=f"acc_{p.proposal_id}", on_click=_decide,
+                                  args=(p.proposal_id, "accepted"), disabled=p.status == "accepted",
+                                  type="primary", width="stretch")
+                        b2.button("Rejeter", key=f"rej_{p.proposal_id}", on_click=_decide,
+                                  args=(p.proposal_id, "rejected"), disabled=p.status == "rejected", width="stretch")
+
+        # ---------------------------------------------------------------- assistant (chat)
+        if t_chat.open:
+            with t_chat:
+                st.caption("L'assistant ne répond jamais de mémoire : il interroge le modèle via des outils "
+                           "(uncovered_needs, constraints_in_text_only, find_element…) et cite les ids.")
+                llm_ok, llm_label = provider_status(SETTINGS.llm)
+                if not llm_ok:
+                    st.info(llm_label)
+                else:
+                    hist_key = f"chat_{export_key}"
+                    history = st.session_state.setdefault(hist_key, [])
+                    for turn in history:
+                        with st.chat_message(turn["role"]):
+                            st.markdown(turn["content"])
+                            if turn.get("tools"):
+                                st.caption("Outils appelés : " + ", ".join(turn["tools"]))
+                    question = st.chat_input("Ex. : quels besoins implicites ne sont couverts par aucun user need ?")
+                    if question:
+                        with st.chat_message("user"):
+                            st.markdown(question)
+                        with st.chat_message("assistant"):
+                            try:
+                                past = [{"role": t["role"], "content": t["content"]} for t in history]
+                                provider, tctx = make_provider(SETTINGS.llm), cached_tool_context(export_key, ex)
+                                ans = run_live("L'assistant interroge le modèle", llm_key("chat"),
+                                               lambda ev: ask(provider, tctx, question, past, on_event=ev))
+                            except LlmUnavailable as e:
+                                st.error(str(e))
+                                st.stop()
+                            st.markdown(ans.text)
+                            tools = [c["name"] for c in ans.tool_calls]
+                            if tools:
+                                st.caption("Outils appelés : " + ", ".join(tools))
+                            if ans.unknown_ids:
+                                st.warning("Ids cités introuvables dans l'export : " + ", ".join(ans.unknown_ids))
+                        history += [{"role": "user", "content": question},
+                                    {"role": "assistant", "content": ans.text, "tools": tools}]
