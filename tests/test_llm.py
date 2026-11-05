@@ -106,6 +106,29 @@ def test_enrichissement_valide_et_marque(ctx) -> None:
 def test_sortie_non_conforme(ctx) -> None:
     res = validate_proposals('{"proposals": [{"kind": "autre"}]}', ctx.export, set())
     assert not res.proposals and res.invalid
+    res = validate_proposals("pas du json", ctx.export, set())
+    assert not res.proposals and "JSON invalide" in res.invalid[0]["detail"]
+
+
+def test_une_proposition_non_conforme_n_ecarte_pas_les_autres(ctx) -> None:
+    step = next(s for s in ctx.export.steps if s.name == "Parking ratio")
+    ok = {"kind": "guard", "title": "Vitesse sous 10 km/h", "text": "Vitesse < 10 km/h.", "rationale": "trigger_text",
+          "target_ids": [step.step_id]}
+    raw = json.dumps({"proposals": [ok, {**ok, "title": "T" * 130}]})
+    res = validate_proposals(raw, ctx.export, {step.step_id})
+    assert [p.title for p in res.proposals] == ["Vitesse sous 10 km/h"]
+    assert len(res.invalid) == 1 and "title" in res.invalid[0]["detail"]
+
+
+def test_schema_de_sortie_sans_mot_cle_refuse_par_l_api() -> None:
+    """minLength / maxLength / minItems… : refusés par les sorties structurées de l'API Claude (erreur 400)."""
+    from p9.llm.enrich import output_schema
+
+    def keys(node) -> set[str]:
+        if isinstance(node, dict):
+            return set(node) | {k for v in node.values() for k in keys(v)}
+        return {k for v in node for k in keys(v)} if isinstance(node, list) else set()
+    assert not keys(output_schema()) & {"minLength", "maxLength", "minItems", "maxItems", "minimum", "maximum"}
 
 
 def _proposal(ctx, **kw) -> Proposal:
