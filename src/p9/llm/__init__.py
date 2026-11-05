@@ -14,6 +14,7 @@ from .enrich import (
     enrich,
     load_store,
     save_store,
+    store_path,
     validate_proposals,
 )
 from .providers import LlmUnavailable, make_provider, provider_status
@@ -23,5 +24,5 @@ __all__ = [
     "SYSTEM_PROMPT", "TOOLS", "AgentAnswer", "EnrichResult", "LlmUnavailable", "Proposal", "ProposalFileError",
     "ProposalStore",
     "ToolContext", "ask", "build_payload", "check_citations", "enrich", "load_store", "make_provider",
-    "provider_status", "run_tool", "save_store", "validate_proposals",
+    "provider_status", "run_tool", "save_store", "store_path", "validate_proposals",
 ]

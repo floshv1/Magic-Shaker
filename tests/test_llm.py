@@ -152,6 +152,18 @@ def test_store_decisions(ctx, tmp_path) -> None:
         load_store(tmp_path / "p.json")
 
 
+def test_emplacement_des_propositions(tmp_path) -> None:
+    from p9.llm import store_path
+    new, out = tmp_path / "review" / "llm_proposals.json", tmp_path / "out"
+    assert store_path(new, out) == new                        # rien d'existant : le fichier versionné
+    out.mkdir()
+    (out / "proposals.json").write_text("{}", encoding="utf-8")
+    assert store_path(new, out) == out / "proposals.json"     # l'ancien est relu tant que le nouveau n'existe pas
+    new.parent.mkdir()
+    new.write_text("{}", encoding="utf-8")
+    assert store_path(new, out) == new
+
+
 def test_l_agent_voit_les_decisions_humaines(export) -> None:
     """Une contrainte en texte libre écartée par un humain n'est plus « partielle » pour l'agent."""
     from p9.checks import finding_id, run_all

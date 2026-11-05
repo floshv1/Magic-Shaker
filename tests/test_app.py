@@ -14,6 +14,7 @@ APP = str(Path(__file__).parents[1] / "app" / "app.py")
 def app(monkeypatch, tmp_path) -> AppTest:
     monkeypatch.setenv("P9_OUT_DIR", str(tmp_path))          # pas d'écriture dans out/
     monkeypatch.setenv("P9_REVIEW_FILE", str(tmp_path / "review" / "decisions.json"))   # ni dans review/
+    monkeypatch.setenv("P9_PROPOSALS_FILE", str(tmp_path / "review" / "llm_proposals.json"))
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("P9_LLM_PROVIDER", "anthropic")
     at = AppTest.from_file(APP, default_timeout=120)

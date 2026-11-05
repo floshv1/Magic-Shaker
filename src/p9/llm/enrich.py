@@ -5,7 +5,8 @@
   Pas de biographie, pas d'URL, pas d'export complet.
 - Sortie : JSON structuré validé par pydantic ; chaque proposition est `origin="llm"`,
   `status="to_validate"`, et ne cite que des ids qui existent dans l'export.
-- Les décisions humaines (accepted / rejected) sont stockées à part (out/proposals.json).
+- Les décisions humaines (accepted / rejected) sont stockées à part (`proposals_file`, versionné :
+  review/llm_proposals.json par défaut).
 """
 
 from __future__ import annotations
@@ -200,6 +201,18 @@ class ProposalStore(BaseModel):
 
     def accepted(self) -> list[Proposal]:
         return [p for p in self.proposals if p.status == "accepted"]
+
+
+LEGACY_STORE = "proposals.json"     # ancien emplacement, dans out/ (ignoré par git, effacé par `make clean`)
+
+
+def store_path(proposals_file: Path | None, out_dir: Path) -> Path:
+    """Fichier de propositions à lire : `proposals_file`, ou l'ancien out/proposals.json tant qu'il n'existe pas
+    (les décisions déjà prises restent appliquées ; le prochain enregistrement écrit `proposals_file`)."""
+    legacy = out_dir / LEGACY_STORE
+    if proposals_file is None:
+        return legacy
+    return legacy if not proposals_file.is_file() and legacy.is_file() else proposals_file
 
 
 class ProposalFileError(ValueError):

@@ -51,11 +51,13 @@ from p9.llm import (
     make_provider,
     provider_status,
     save_store,
+    store_path,
 )
 
 APP_DIR = Path(__file__).resolve().parent
 SETTINGS = load_settings(APP_DIR)
-PROPOSALS_PATH = SETTINGS.out_dir / "proposals.json"
+# propositions LLM : écrites dans le fichier versionné, lues via store_path (repli sur l'ancien out/proposals.json)
+PROPOSALS_PATH = SETTINGS.proposals_file or SETTINGS.out_dir / "proposals.json"
 STEPS = ["Importer", "Choisir", "Résultats"]
 RESULT_TABS = ["Diagrammes", "Fichiers .sysml", "Points à valider", "Assistant"]
 
@@ -543,7 +545,7 @@ def _findings_block(title: str, check: str, empty: str, why: str = "") -> None:
 
 def _decide(pid: str, status: str) -> None:
     try:
-        s = load_store(PROPOSALS_PATH)
+        s = load_store(store_path(PROPOSALS_PATH, SETTINGS.out_dir))
     except ProposalFileError:
         return          # fichier illisible : rien n'est écrasé, le bandeau d'erreur l'explique
     s.decide(pid, status)  # type: ignore[arg-type]
@@ -778,7 +780,7 @@ if step == 3:
     with st.container(key="stepbody_3"):   # nouveau bloc à chaque étape : rien ne reste de la précédente
         # Fichier illisible : on continue sans son contenu, on le signale, et rien n'y est écrit (pas d'écrasement).
         try:
-            store, store_error = load_store(PROPOSALS_PATH), ""
+            store, store_error = load_store(store_path(PROPOSALS_PATH, SETTINGS.out_dir)), ""
         except ProposalFileError as e:
             store, store_error = ProposalStore(), str(e)
         accepted = ProposalStore(proposals=store.accepted())

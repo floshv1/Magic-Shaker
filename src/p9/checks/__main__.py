@@ -24,11 +24,11 @@ def main(argv: list[str]) -> int:
     except ExportUnreadable as e:
         print(f"Erreur : {e}")
         return 2
-    from p9.llm.enrich import ProposalFileError, load_store
+    from p9.llm.enrich import ProposalFileError, load_store, store_path
     from p9.review import ReviewFileError, load_review, review_csv
     try:
         review = load_review(s.review_file)
-        accepted = load_store(s.out_dir / "proposals.json").accepted()
+        accepted = load_store(store_path(s.proposals_file, s.out_dir)).accepted()
     except (ProposalFileError, ReviewFileError) as e:
         print(f"Erreur : {e}")
         return 2
