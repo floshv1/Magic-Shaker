@@ -16,6 +16,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from p9.ingest import Export
+from p9.ingest.models import Persona
 
 Severity = Literal["error", "warning", "info"]
 
@@ -82,6 +83,28 @@ def refers_to(sentence: str, name_words: set[str], window: int = 5) -> bool:
 
 def first_name(name: str) -> str:
     return name.split()[0] if name.split() else name
+
+
+def seat_roles(text: str | None) -> list[tuple[str, int]]:
+    """Rôles d'occupant (SEAT_ROLES) cités dans un texte, avec leur position. Le plus long l'emporte et un passage
+    ne compte qu'une fois : « co-driver » ou « driver's seat » ne sont pas aussi « driver »."""
+    low = (text or "").lower()
+    found: list[tuple[str, int]] = []
+    for role in sorted(SEAT_ROLES, key=len, reverse=True):
+        for a, b in [m.span() for m in re.finditer(rf"\b{re.escape(role)}\b", low)]:
+            found.append((role, a))
+            low = low[:a] + " " * (b - a) + low[b:]       # masqué : un rôle plus court n'y est pas recompté
+    return sorted(found, key=lambda rp: rp[1])
+
+
+def nearest_persona(sentence: str, pos: int, personas: list[Persona]) -> Persona | None:
+    """Persona dont le prénom est cité le plus près de la position `pos` (à égalité : le premier de la liste)."""
+    best: tuple[int, Persona] | None = None
+    for p in personas:
+        for m in re.finditer(rf"\b{re.escape(first_name(p.name))}\b", sentence):
+            if best is None or abs(m.start() - pos) < best[0]:
+                best = (abs(m.start() - pos), p)
+    return best[1] if best else None
 
 
 # --------------------------------------------------------------------- contrôles structurels
@@ -195,7 +218,7 @@ def persona_inconsistencies(ex: Export) -> list[Finding]:
     1. Persona nommé dans les textes d'un use case auquel il n'est pas rattaché.
     2. Persona rattaché à un use case mais présent à aucun step (feedback is_present).
     3. Conflit de rôle : une phrase donne au persona X un rôle d'occupant (« front passenger »…)
-       que la biographie attribue au persona Y.
+       que la biographie attribue au persona Y. X est le persona nommé le plus près du rôle dans la phrase.
     4. Renvoi temporel d'un use case à un autre (« after the charging stop » : au moins deux mots du
        nom de l'autre use case + un marqueur temporel) avec des personas différents.
     """
@@ -223,6 +246,7 @@ def persona_inconsistencies(ex: Export) -> list[Finding]:
     def pname(pid: str) -> str:
         return first_name(ex.by_id("personas")[pid].name)
 
+    bio_roles = {p.persona_id: {r for r, _ in seat_roles(p.biography)} for p in personas}
     out: list[Finding] = []
     for uc in ex.use_cases_sorted():
         uid = uc.use_case_id
@@ -239,32 +263,29 @@ def persona_inconsistencies(ex: Export) -> list[Finding]:
                 out.append(Finding(check="persona_inconsistencies", severity="info",
                                    message=f"{label(uid)} : {fn} est rattache au use case mais present a aucun step.",
                                    ids=[uid, p.persona_id], use_case_id=uid))
-        # 3. conflits de rôle
+        # 3. conflits de rôle : chaque rôle cité va au persona nommé le plus près de lui dans la phrase
         for step_id, text in texts:
             for sent in sentences(text):
-                low = sent.lower()
-                for role in SEAT_ROLES:
-                    if role not in low:
+                seen: set[tuple[str, str]] = set()
+                for role, pos in seat_roles(sent):
+                    x = nearest_persona(sent, pos, personas)
+                    if x is None or (x.persona_id, role) in seen or role in bio_roles[x.persona_id]:
                         continue
-                    owners = [q for q in personas if role in (q.biography or "").lower()]
-                    for x in personas:
-                        if not re.search(rf"\b{re.escape(first_name(x.name))}\b", sent):
+                    seen.add((x.persona_id, role))
+                    for y in personas:
+                        if y.persona_id == x.persona_id or role not in bio_roles[y.persona_id]:
                             continue
-                        for y in owners:
-                            if y.persona_id == x.persona_id or role in (x.biography or "").lower():
-                                continue
-                            other_ucs = sorted(u for u, ps in linked.items() if y.persona_id in ps and u != uid)
-                            where = ", ".join(label(u) for u in other_ucs) or "aucun use case"
-                            absent = "" if y.persona_id in linked[uid] else f" ; {pname(y.persona_id)} est absent de ce use case"
-                            out.append(Finding(
-                                check="persona_inconsistencies",
-                                message=(f"{label(uid)} : « {sent} » donne a {pname(x.persona_id)} le role "
-                                         f"'{role}', que la biographie attribue a {pname(y.persona_id)} "
-                                         f"(present dans {where}){absent}."),
-                                ids=[uid, x.persona_id, y.persona_id] + ([step_id] if step_id else []),
-                                use_case_id=uid, step_id=step_id, detail={"role": role, "sentence": sent},
-                            ))
-                        break
+                        other_ucs = sorted(u for u, ps in linked.items() if y.persona_id in ps and u != uid)
+                        where = ", ".join(label(u) for u in other_ucs) or "aucun use case"
+                        absent = "" if y.persona_id in linked[uid] else f" ; {pname(y.persona_id)} est absent de ce use case"
+                        out.append(Finding(
+                            check="persona_inconsistencies",
+                            message=(f"{label(uid)} : « {sent} » donne a {pname(x.persona_id)} le role "
+                                     f"'{role}', que la biographie attribue a {pname(y.persona_id)} "
+                                     f"(present dans {where}){absent}."),
+                            ids=[uid, x.persona_id, y.persona_id] + ([step_id] if step_id else []),
+                            use_case_id=uid, step_id=step_id, detail={"role": role, "sentence": sent},
+                        ))
         # 4. renvoi vers un autre use case
         for other in ex.use_cases_sorted():
             if other.use_case_id == uid:
@@ -446,7 +467,8 @@ CHECK_RULES: dict[str, list[str]] = {
         "Persona cité par son prénom dans ces textes sans être rattaché au use case (use_case_personas).",
         "Persona rattaché au use case mais présent (is_present) à aucun de ses steps.",
         "Conflit de rôle : une phrase donne à X un rôle d'occupant (" + ", ".join(SEAT_ROLES) + ") que la "
-        "biographie attribue à un autre persona Y.",
+        "biographie attribue à un autre persona Y. X est le persona nommé le plus près du rôle dans la phrase ; "
+        "le rôle le plus long l'emporte (« co-driver » n'est pas aussi « driver »).",
         "Renvoi à un autre use case (un marqueur temporel comme after ou before, suivi à moins de 5 mots "
         "d'au moins 2 mots du nom de ce use case) alors que les personas des deux use cases diffèrent.",
     ],
