@@ -198,8 +198,9 @@ def cached_diagrams(key: str, _ex: Export, selected: tuple[str, ...], with_requi
 
 
 @st.cache_resource(show_spinner="Préparation des outils de l'agent…")
-def cached_tool_context(key: str, _ex: Export) -> ToolContext:
-    return ToolContext(_ex)
+def cached_tool_context(key: str, _ex: Export, accepted_json: str, review_json: str) -> ToolContext:
+    return ToolContext(_ex, review_decisions=ReviewStore.model_validate_json(review_json).decisions,
+                       accepted_proposals=ProposalStore.model_validate_json(accepted_json).proposals)
 
 
 @st.cache_resource(show_spinner=False)
@@ -785,10 +786,10 @@ if step == 3:
             review, review_error = load_review(SETTINGS.review_file), ""
         except ReviewFileError as e:
             review, review_error = ReviewStore(), str(e)
-        review_json = review.model_dump_json()
+        review_json, accepted_json = review.model_dump_json(), accepted.model_dump_json()
         gen, matrix, cov, trace_csv = cached_generate(
             f"{export_key}|{'|'.join(translated)}|{hashlib.sha256(review_json.encode()).hexdigest()}", ex, translated,
-            accepted.model_dump_json(), review_json)
+            accepted_json, review_json)
         catia_files = cached_catia(f"{export_key}|{'|'.join(translated)}", ex, translated)
         findings = cached_findings(export_key, ex)
         rv_state = review_state(findings, review)
@@ -960,7 +961,8 @@ if step == 3:
 
                 if st.button("Générer des propositions", disabled=not llm_ok or bool(store_error)):
                     try:
-                        provider, tctx = make_provider(SETTINGS.llm), cached_tool_context(export_key, ex)
+                        provider = make_provider(SETTINGS.llm)
+                        tctx = cached_tool_context(export_key, ex, accepted_json, review_json)
                         res = run_live("Le LLM analyse les points à valider", llm_key("enrich"),
                                        lambda ev: enrich(provider, tctx, on_event=ev))
                     except LlmUnavailable as e:
@@ -1014,7 +1016,8 @@ if step == 3:
                         with st.chat_message("assistant"):
                             try:
                                 past = [{"role": t["role"], "content": t["content"]} for t in history]
-                                provider, tctx = make_provider(SETTINGS.llm), cached_tool_context(export_key, ex)
+                                provider = make_provider(SETTINGS.llm)
+                                tctx = cached_tool_context(export_key, ex, accepted_json, review_json)
                                 ans = run_live("L'assistant interroge le modèle", llm_key("chat"),
                                                lambda ev: ask(provider, tctx, question, past, on_event=ev))
                             except LlmUnavailable as e:

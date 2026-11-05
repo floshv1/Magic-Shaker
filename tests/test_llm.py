@@ -152,6 +152,24 @@ def test_store_decisions(ctx, tmp_path) -> None:
         load_store(tmp_path / "p.json")
 
 
+def test_l_agent_voit_les_decisions_humaines(export) -> None:
+    """Une contrainte en texte libre écartée par un humain n'est plus « partielle » pour l'agent."""
+    from p9.checks import finding_id, run_all
+    from p9.review import Decision
+    speed = next(f for f in run_all(export)["constraints_in_text_only"] if "10 km/h" in f.message)
+    d = Decision(finding_id=finding_id(speed), check=speed.check, action="dismiss", author="Testeur",
+                 decided_at="2026-11-05", reason="vitesse geree hors parcours", target_ids=list(speed.ids))
+
+    def text_rows(c: ToolContext, status: str) -> list[str]:
+        rows = json.loads(run_tool(c, "traceability_status", {"status": status})[0])["rows"]
+        return [r["usershaker_id"] for r in rows if r["kind"] == "text_constraint"]
+    assert any(speed.step_id in i for i in text_rows(ToolContext(export), "partial"))
+    with_decision = ToolContext(export, review_decisions=[d])
+    assert not any(speed.step_id in i for i in text_rows(with_decision, "partial"))
+    rows = [e for k, es in with_decision.trace.items() if speed.step_id in k for e in es if e.kind == "text_constraint"]
+    assert rows and all(e.status == "mapped" and "ecarte par Testeur" in e.reason for e in rows)
+
+
 def test_rendu_propositions_acceptees_separees(ctx) -> None:
     need = ctx.export.user_needs[0]
     accepted = [_proposal(ctx), _proposal(ctx, kind="rephrase", title="Reformulation", proposal_id="fff000aaa111",
