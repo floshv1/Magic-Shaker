@@ -155,6 +155,7 @@ Les contrôles doivent les détecter automatiquement. Ce sont aussi les exemples
 - **Enrichissement** : lit le texte libre (descriptions, `trigger_text`, insights) et propose des gardes, des requirements et des reformulations. La sortie est en JSON structuré (validée par pydantic), toujours marquée `to_validate`.
 - **Chat** : agent en tool calling. Le LLM ne répond jamais de mémoire. Il appelle des fonctions Python qui interrogent le graphe (`uncovered_needs`, `unreachable_states`, `constraints_in_text_only`, `persona_inconsistencies`, `find_element(id)`…) et cite les ids dans sa réponse.
 - **Data protection** : n'envoyer au LLM que ce qui est nécessaire. Prévoir un mode Ollama local. Les clés vont dans `.env`, jamais commitées.
+- **Mesurer avant de changer** : `make eval-llm` passe les questions de `evals/llm_questions.json` (ids et mots attendus, outils attendus, réponse en français, aucun id inventé) et écrit `out/llm_eval.json`. Lancer avant et après toute modification du prompt, des outils ou du modèle ; les réponses varient d'un passage à l'autre, comparer sur plusieurs passages avant de conclure. Un modèle cloud Ollama (suffixe `-cloud`) ne tourne pas en local : les requêtes quittent la machine.
 
 ## Interface (Streamlit) : spécification
 

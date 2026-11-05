@@ -119,3 +119,21 @@ def test_chaque_controle_a_sa_regle_expliquee() -> None:
     from p9.checks import ALL_CHECKS, CHECK_RULES
     assert set(CHECK_RULES) == set(ALL_CHECKS)
     assert all(CHECK_RULES[k] and all(r.strip() for r in CHECK_RULES[k]) for k in CHECK_RULES)
+
+
+# ------------------------------------------------------------ grille du blueprint vs triggers
+
+def test_condition_contredite_par_la_grille(export, findings) -> None:
+    rows = findings["conditions_vs_grid"]
+    assert len(rows) == 1
+    step = next(s for s in export.steps if s.step_id == rows[0].step_id)
+    assert step.name == "Back to drive configuration"
+    assert rows[0].detail["expected_state"] == "Not connected" and rows[0].detail["grid_state"] == "Charge complete"
+
+
+def test_meme_evenement_reactions_differentes(export, findings) -> None:
+    wheel = next(c.component_id for c in export.components if c.name == "Steer-by-wire half wheel")
+    rows = [f for f in findings["trigger_reaction_conflicts"] if f.ids[0] == wheel]
+    assert len(rows) == 1
+    assert rows[0].detail["event"] == "Gear selector is P"
+    assert {rows[0].detail["state_a"], rows[0].detail["state_b"]} == {"Stowing", "Normal ratio"}

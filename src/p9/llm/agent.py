@@ -22,8 +22,31 @@ permettent pas de repondre, dis-le simplement plutot que de supposer.
 l'equipe puisse le retrouver dans le modele et la matrice de tracabilite.
 - Tu proposes, tu ne modifies rien : presente toute deduction (garde manquante, besoin implicite, \
 incoherence) comme une proposition a valider par un humain.
-- Reponds en francais, de facon concise : quelques phrases ou une courte liste.
+- Reponds toujours en francais, meme si les donnees et les resultats d'outils sont en anglais, de facon \
+concise : quelques phrases ou une courte liste.
+
+Methode :
+- Ce qui manque, est incoherent ou mal traduit : appelle d'abord les outils de controle (uncovered_needs, \
+constraints_in_text_only, conditions_vs_grid, trigger_reaction_conflicts, persona_inconsistencies, \
+implicit_needs, traceability_status).
+- Effet d'un evenement (« que se passe-t-il quand... »), ou comparaison entre use cases : \
+trigger_reaction_conflicts d'abord, puis component_timeline des composants qui reagissent.
+- Etat ou comportement d'un composant a un step : component_timeline (l'id du composant est dans l'index \
+ci-dessous). Ne deduis jamais un etat d'une description : lis-le dans la grille.
+- Un use case ou ses steps : use_case_steps ; un element precis : find_element ; un nom inconnu : \
+search_elements.
 """
+
+
+def context_index(ctx: ToolContext) -> str:
+    """Index compact de l'export (noms et ids), ajouté au prompt système : le LLM appelle les outils
+    directement au lieu de chercher les ids. Noms seulement (pas de texte libre ni de biographie)."""
+    ex = ctx.export
+    ucs = " ; ".join(f"UC{u.position} '{u.name}' `{u.use_case_id}`" for u in ex.use_cases_sorted())
+    personas = " ; ".join(f"'{p.name}' `{p.persona_id}`" for p in sorted(ex.personas, key=lambda p: p.name))
+    comps = " ; ".join(f"'{c.name}' ({c.role}) `{c.component_id}`"
+                       for c in sorted(ex.components, key=lambda c: c.name))
+    return f"Index de l'export :\n- Use cases : {ucs}\n- Personas : {personas}\n- Composants : {comps}\n"
 
 ID_RE = re.compile(r"\b[a-z0-9]{20,30}\b")
 
@@ -57,7 +80,8 @@ def ask(provider: Any, ctx: ToolContext, question: str, history: list[dict[str, 
     """Pose une question ; `history` = tours précédents [{role, content(str)}] (texte seulement).
 
     `on_event(kind, text)` : suivi de l'avancement (voir providers)."""
-    res: ChatResult = provider.chat_with_tools(SYSTEM_PROMPT, question, history or [], ctx, on_event=on_event)
+    system = f"{SYSTEM_PROMPT}\n{context_index(ctx)}"
+    res: ChatResult = provider.chat_with_tools(system, question, history or [], ctx, on_event=on_event)
     if on_event is not None:
         on_event("step", "Verification des ids cites dans la reponse")
     cited, unknown = check_citations(res.text, ctx)

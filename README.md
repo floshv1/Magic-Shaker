@@ -54,6 +54,7 @@ le point avec sa raison. Une proposition du LLM peut être reprise puis modifié
 | `make trace` | `out/traceability.csv`, `out/coverage.html`, `out/findings.json`, et une matrice par fichier CATIA (`out/catia/<UC>.traceability.csv`) |
 | `make test` | tests rapides (pytest) |
 | `make test-omg` | tests qui lancent le parseur OMG (lents) |
+| `make eval-llm` | mesure l'agent de chat sur `evals/llm_questions.json` (questions à réponse connue, score automatique) → `out/llm_eval.json` ; appelle le LLM configuré (coût si API payante) |
 | `make check` | `generate validate trace test` : à lancer après toute modification du générateur |
 
 ## Architecture

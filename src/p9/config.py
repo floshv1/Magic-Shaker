@@ -8,7 +8,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-_DEFAULTS = {"data_dir": "data/usershaker", "out_dir": "out", "review_file": "review/decisions.json"}
+_DEFAULTS = {"data_dir": "data/usershaker", "out_dir": "out", "review_file": "review/decisions.json",
+             "llm_eval_file": "evals/llm_questions.json"}
 _GENERATE_DEFAULTS = {
     "project_package": "Project",
     "common_package": "Common",
@@ -95,6 +96,7 @@ class Settings:
     llm: LlmSettings = field(default_factory=lambda: LlmSettings(**_LLM_DEFAULTS))
     catia: CatiaSettings = field(default_factory=lambda: CatiaSettings(**_CATIA_DEFAULTS))
     review_file: Path | None = None      # décisions humaines sur les points à valider (versionné)
+    llm_eval_file: Path | None = None    # questions de mesure de l'agent de chat (versionné)
 
 
 def load_settings(start: Path | None = None) -> Settings:
@@ -128,4 +130,5 @@ def load_settings(start: Path | None = None) -> Settings:
     )
     catia = CatiaSettings(**{**_CATIA_DEFAULTS, **tool.get("catia", {})})
     return Settings(root=root, data_dir=resolve("data_dir"), out_dir=resolve("out_dir"), generate=gen, omg=omg,
-                    llm=llm, catia=catia, review_file=resolve("review_file"))
+                    llm=llm, catia=catia, review_file=resolve("review_file"),
+                    llm_eval_file=resolve("llm_eval_file"))

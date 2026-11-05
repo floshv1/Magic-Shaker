@@ -333,11 +333,97 @@ def implicit_needs(ex: Export) -> list[Finding]:
     return out
 
 
+# --------------------------------------------------------------------- grille du blueprint vs triggers
+
+def _grid_by_step(ex: Export) -> dict[tuple[str, str], list[str]]:
+    """(step_id, component_id) → state_ids dans l'ordre de sequence."""
+    grid: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for r in sorted(ex.step_component_states, key=lambda r: (r.step_id, r.component_id, r.sequence)):
+        grid[(r.step_id, r.component_id)].append(r.state_id)
+    return dict(grid)
+
+
+def conditions_vs_grid(ex: Export) -> list[Finding]:
+    """Un trigger ou une condition d'un step doit être l'état de son composant dans la grille de ce step."""
+    states, comps, steps = ex.by_id("component_states"), ex.by_id("components"), ex.by_id("steps")
+    grid = _grid_by_step(ex)
+    out = []
+    for t in sorted(ex.step_triggers, key=lambda t: (t.step_id, t.position)):
+        seen = grid.get((t.step_id, t.component_id))
+        if not seen or t.state_id in seen or t.state_id not in states or t.step_id not in steps:
+            continue                                  # composant absent de la grille ou état cohérent
+        step = steps[t.step_id]
+        comp = comps[t.component_id].name if t.component_id in comps else t.component_id
+        expected = states[t.state_id].name
+        actual = " -> ".join(states[s].name if s in states else s for s in seen)
+        word, agreed = ("Le trigger", "contredit") if t.kind == "trigger" else ("La condition", "contredite")
+        out.append(Finding(
+            check="conditions_vs_grid", severity="warning",
+            message=f"{word} « {comp} is {expected} » du step '{step.name}' est {agreed} par la grille du "
+                    f"blueprint, qui place '{comp}' dans l'etat '{actual}' a ce step.",
+            ids=[t.step_id, t.trigger_id, t.component_id, t.state_id], use_case_id=step.use_case_id,
+            step_id=t.step_id, detail={"kind": t.kind, "expected_state": expected, "grid_state": actual}))
+    return out
+
+
+def trigger_reaction_conflicts(ex: Export) -> list[Finding]:
+    """Même événement dans deux steps : un composant qui change d'état dans l'un doit finir dans le même état
+    dans l'autre. Sinon la réaction à l'événement dépend du use case (ou la grille est incohérente)."""
+    states, comps, ucs = ex.by_id("component_states"), ex.by_id("components"), ex.by_id("use_cases")
+    grid = _grid_by_step(ex)
+
+    def name(sid: str) -> str:
+        return states[sid].name if sid in states else sid
+
+    # par step : état final de chaque composant, et s'il a changé à ce step (réaction)
+    after: dict[str, dict[str, str]] = {}
+    reacted: dict[str, set[str]] = defaultdict(set)
+    label: dict[str, str] = {}
+    for uc in ex.use_cases_sorted():
+        prev: dict[str, str] = {}
+        for s in ex.steps_of(uc.use_case_id):
+            label[s.step_id] = f"UC{uc.position} step {s.position} '{s.name}'"
+            cur = {c: seq[-1] for (sid, c), seq in grid.items() if sid == s.step_id}
+            for (sid, c), seq in grid.items():
+                if sid == s.step_id and (len(seq) > 1 or (c in prev and prev[c] != seq[0])):
+                    reacted[s.step_id].add(c)
+            after[s.step_id] = cur
+            prev = {**prev, **cur}
+    events: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for t in sorted(ex.step_triggers, key=lambda t: (t.step_id, t.position)):
+        if t.kind == "trigger" and t.step_id in after:
+            events[(t.component_id, t.state_id)].append(t.step_id)
+    out = []
+    for (ev_comp, ev_state), step_ids in sorted(events.items()):
+        ev = f"{comps[ev_comp].name if ev_comp in comps else ev_comp} is {name(ev_state)}"
+        for i, a in enumerate(step_ids):
+            for b in step_ids[i + 1:]:
+                for c in sorted((reacted[a] | reacted[b]) & after[a].keys() & after[b].keys() - {ev_comp}):
+                    if after[a][c] == after[b][c]:
+                        continue
+                    cname = comps[c].name if c in comps else c
+
+                    def how(step: str) -> str:
+                        verb = "passe a" if c in reacted[step] else "reste en"
+                        return f"{verb} '{name(after[step][c])}' dans {label[step]}"
+                    uc_ids = sorted({s.use_case_id for s in ex.steps if s.step_id in (a, b)} & ucs.keys())
+                    out.append(Finding(
+                        check="trigger_reaction_conflicts", severity="warning",
+                        message=f"Meme evenement « {ev} », reactions differentes : '{cname}' {how(a)}, mais "
+                                f"{how(b)}.",
+                        ids=[c, a, b, ev_comp, ev_state, *uc_ids],
+                        detail={"event": ev, "component": cname, "state_a": name(after[a][c]),
+                                "state_b": name(after[b][c])}))
+    return out
+
+
 ALL_CHECKS = {
     "uncovered_needs": uncovered_needs,
     "unreachable_states": unreachable_states,
     "invalid_triggers": invalid_triggers,
     "invalid_grid_states": invalid_grid_states,
+    "conditions_vs_grid": conditions_vs_grid,
+    "trigger_reaction_conflicts": trigger_reaction_conflicts,
     "constraints_in_text_only": constraints_in_text_only,
     "persona_inconsistencies": persona_inconsistencies,
     "implicit_needs": implicit_needs,
@@ -378,6 +464,19 @@ CHECK_RULES: dict[str, list[str]] = {
         "Dans un step, la 1re ligne doit être kind = trigger, les suivantes kind = condition.",
     ],
     "invalid_grid_states": ["Dans la grille du blueprint, l'état doit appartenir au composant de sa ligne."],
+    "conditions_vs_grid": [
+        "Pour chaque ligne step_triggers (trigger ou condition), on lit l'état de son composant dans la grille "
+        "du blueprint au même step (toutes les lignes de sequence).",
+        "Si le composant figure dans la grille de ce step sans jamais y être dans l'état attendu, la ligne est "
+        "signalée : le step exige un état que la grille contredit.",
+    ],
+    "trigger_reaction_conflicts": [
+        "Les steps sont regroupés par événement (ligne kind = trigger : même composant, même état).",
+        "Pour deux steps du même événement, on compare l'état final de chaque composant présent dans les deux "
+        "grilles (hors composant de l'événement).",
+        "Un écart est signalé si le composant a changé d'état (réagi) dans au moins un des deux steps : la "
+        "réaction à l'événement dépend du use case.",
+    ],
 }
 
 

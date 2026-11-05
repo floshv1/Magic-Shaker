@@ -8,7 +8,7 @@ RUN := $(UV) run --no-sync
 # OneDrive refuse les liens physiques : uv copie les fichiers.
 export UV_LINK_MODE := copy
 
-.PHONY: install ingest generate validate validate-setup trace test test-omg check demo clean
+.PHONY: install ingest generate validate validate-setup trace test test-omg eval-llm check demo clean
 
 install:
 	$(UV) sync
@@ -36,6 +36,11 @@ test:
 # Tests qui lancent le parseur OMG (lents : ~1-3 min).
 test-omg: validate-setup
 	$(RUN) pytest -m omg
+
+# Mesure de l'agent de chat sur evals/llm_questions.json -> out/llm_eval.json.
+# Appelle le LLM configure (.env) : cout si l'API est payante.
+eval-llm:
+	$(RUN) python -m p9.llm.evaluate
 
 # Ce qu'il faut lancer apres une modification du generateur.
 check: generate validate trace test
