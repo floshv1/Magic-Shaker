@@ -50,7 +50,7 @@ common_package = "ESpaceCommon"
 system_name = "ESpace"
 subject_name = "vehicle"
 
-# Sortie CATIA Community (out/catia/) : limites constatees de l'edition gratuite 2026x.
+# Sortie CATIA Community (out/catia_community/) : limites constatees de l'edition gratuite 2026x.
 [tool.p9.catia]
 char_limit = 20000     # l'editeur textuel refuse au-dela (par espace de noms racine)
 char_budget = 19000    # cible du generateur : marge pour les vues ajoutees a la main et le reformatage CATIA

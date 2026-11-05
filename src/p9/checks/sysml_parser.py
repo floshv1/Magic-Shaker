@@ -30,6 +30,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from p9.config import OmgSettings, load_settings
+from p9.generate.catia import CATIA_DIR
 
 JAVA_HELPER = "P9Validate"
 
@@ -234,7 +235,7 @@ def order_by_imports(texts: dict[str, str]) -> list[str]:
 
 
 def catia_prelude() -> Path:
-    """Remplaçant de la bibliothèque DS_Views de CATIA, à charger avant les fichiers out/catia/."""
+    """Remplaçant de la bibliothèque DS_Views de CATIA, à charger avant les fichiers out/catia_community/."""
     return load_settings().root / "tools" / "sysml" / "DS_Views.sysml"
 
 
@@ -338,7 +339,7 @@ def main(argv: list[str]) -> int:
         groups = [sorted((out / "sysml").glob("*.sysml")), [out / "model.sysml"]]
         groups = [[p for p in g if p.is_file()] for g in groups]
         # Fichiers CATIA autonomes : une session à part, après le remplaçant de DS_Views.
-        catia_group = sorted((out / "catia").glob("*.sysml"))
+        catia_group = sorted((out / CATIA_DIR).glob("*.sysml"))
         if not any(groups) and not catia_group:
             print(f"Aucun .sysml dans {out} : lancer `make generate` d'abord.")
             return 2

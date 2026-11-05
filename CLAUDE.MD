@@ -133,7 +133,7 @@ Les contrôles doivent les détecter automatiquement. Ce sont aussi les exemples
 
 - L'éditeur textuel refuse plus de **20 000 caractères** par espace de noms racine ; le modèle est limité à
   **500 éléments majeurs** ; le menu Fichier n'a pas « Import From » (on colle le texte dans l'éditeur, puis Alt+S).
-- Le modèle complet (`out/sysml/`, `out/model.sysml`) n'y entre donc pas : on y charge `out/catia/`, un fichier
+- Le modèle complet (`out/sysml/`, `out/model.sysml`) n'y entre donc pas : on y charge `out/catia_community/`, un fichier
   autonome par use case (`generate/catia.py`, template `catia_use_case.sysml.j2`), testé sous la limite
   (`tests/test_catia.py`). Toute réduction ajoutée va dans `TRIMS` et dans la matrice du fichier CATIA.
 - Syntaxe vérifiée dans CATIA : `@UserShakerRef { :>> id = "..."; }` (CATIA réécrit `id =` en `:>> id =`),

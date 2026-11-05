@@ -19,6 +19,7 @@ from datetime import date
 from html import escape
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -38,7 +39,7 @@ from p9.review import (
     review_state,
     save_review,
 )
-from p9.generate import Diagram, build_diagrams, generate, generate_catia, make_zip
+from p9.generate import CATIA_DIR, Diagram, build_diagrams, generate, generate_catia, make_zip
 from p9.ingest import REQUIRED_SHEETS, Export, ExportUnreadable, load_dir, load_zip, use_case_summaries
 from p9.llm import (
     LlmUnavailable,
@@ -476,6 +477,28 @@ def _select_all(value: bool) -> None:
         st.session_state[f"sel_{u.use_case_id}"] = value
 
 
+def _emotion_chart(u) -> alt.Chart:
+    """Courbe d'émotion lisible : échelle fixe -5..+5, ligne du zéro, couleur de chaque persona,
+    numéro du step en abscisse et nom complet au survol."""
+    order = list(u.emotions.index)
+    data = (u.emotions.reset_index(names="step")
+            .melt(id_vars="step", var_name="persona", value_name="emotion").dropna())
+    names = [p.name for p in u.personas if p.name in set(data["persona"])]
+    names += sorted(set(data["persona"]) - set(names))
+    colors = {p.name: p.color for p in u.personas if p.color}
+    color = alt.Color("persona:N", title=None, legend=alt.Legend(orient="bottom"),
+                      scale=alt.Scale(domain=names, range=[colors.get(n, "#888888") for n in names])
+                      if all(n in colors for n in names) else alt.Undefined)
+    x = alt.X("step:N", sort=order, title=None,
+              axis=alt.Axis(labelAngle=0, labelExpr="split(datum.label, '.')[0]"))
+    y = alt.Y("emotion:Q", title=None, scale=alt.Scale(domain=[-5, 5]), axis=alt.Axis(values=[-5, 0, 5]))
+    tip = [alt.Tooltip("step:N", title="Step"), alt.Tooltip("persona:N", title="Persona"),
+           alt.Tooltip("emotion:Q", title="Émotion", format=".1f")]
+    base = alt.Chart(data).encode(x=x, y=y, color=color, tooltip=tip)
+    zero = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(color="#9aa0a6", strokeDash=[4, 4]).encode(y="y:Q")
+    return (zero + base.mark_line(strokeWidth=2.5) + base.mark_point(size=60, filled=True)).properties(height=260)
+
+
 def _uc_row(u) -> None:
     with st.container(key=f"ucrow_{u.use_case_id}"):
         left, right = st.columns([0.6, 0.4], gap="large")
@@ -503,7 +526,7 @@ def _uc_row(u) -> None:
             with c2:
                 if not u.emotions.empty:
                     st.markdown("**Émotion par persona, de -5 à +5**")
-                    st.line_chart(u.emotions, width="stretch", height=200)
+                    st.altair_chart(_emotion_chart(u), width="stretch")
 
 
 if step == 2:
@@ -816,10 +839,10 @@ if step == 3:
         if review.decisions:
             bundle["review/decisions.json"] = review_json_pretty(review)
             bundle["review/review.csv"] = review_csv(review)
-        bundle.update({f"catia/{f.name}": f.text for f in catia_files})
+        bundle.update({f"{CATIA_DIR}/{f.name}": f.text for f in catia_files})
         head[2].download_button("Télécharger le modèle (.zip)", make_zip(bundle), file_name="sysml_export.zip",
                                 mime="application/zip", type="primary", width="stretch",
-                                help="Fichiers .sysml (commun + un par use case), traceability.csv, et catia/ : "
+                                help="Fichiers .sysml (commun + un par use case), traceability.csv, et catia_community/ : "
                                      "un fichier autonome par use case pour CATIA Community")
         if translated != selected:
             st.info("La sélection a changé depuis cette traduction. Revenez à l'étape Choisir pour traduire à nouveau.")

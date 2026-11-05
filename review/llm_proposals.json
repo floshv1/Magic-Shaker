@@ -1,0 +1,46 @@
+{
+  "proposals": [
+    {
+      "kind": "requirement",
+      "title": "Visibility of battery level indicator",
+      "text": "The battery level indicator must be visible on the instrument cluster after the charging port reaches the target charge (gear P).",
+      "rationale": "Serves the implicit need “Know battery level and remaining charge time at a glance” and prevents uncertainty during the stop at the charger.",
+      "target_ids": [
+        "c0593bace6c818487dc0a0002",
+        "ccdd8e505c8dfb9b8a8ba7ab2"
+      ],
+      "proposal_id": "75dac20a4afa",
+      "source_item": "",
+      "origin": "llm",
+      "status": "accepted"
+    },
+    {
+      "kind": "requirement",
+      "title": "Battery level indicator remains visible during gear P",
+      "text": "When the vehicle is in gear P (stop‑at‑charger), the battery level indicator must stay visible.",
+      "rationale": "Adds a guard to the same implicit need, ensuring the information is not lost while the car is stationary.",
+      "target_ids": [
+        "ccdd8e505c8dfb9b8a8ba7ab2",
+        "c0593bace6c818487dc0a0002"
+      ],
+      "proposal_id": "897691c1459d",
+      "source_item": "",
+      "origin": "llm",
+      "status": "to_validate"
+    },
+    {
+      "kind": "requirement",
+      "title": "Speed limit respected when Gear R is engaged",
+      "text": "When the gear selector is set to R, the vehicle speed must not exceed 10 km/h.",
+      "rationale": "Affects the “Only below 10 km/h” constraint for tight‑space maneuvers. Guarantees the safety rule that the game is intended for is respected.",
+      "target_ids": [
+        "ccdd8e505c8dfb9b8a8ba7ab2",
+        "cac1c57703dcb8241e7f71f9e"
+      ],
+      "proposal_id": "aaedd07d6f2b",
+      "source_item": "",
+      "origin": "llm",
+      "status": "to_validate"
+    }
+  ]
+}

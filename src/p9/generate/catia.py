@@ -33,6 +33,8 @@ from .naming import Namer, lower_first
 from .render import Generated, _normalize, make_env
 from .trace import TraceEntry
 
+CATIA_DIR = "catia_community"   # dossier des fichiers CATIA Community, dans out/ et dans le zip
+
 # Vues symboliques de la bibliothèque DS_Views de CATIA (types relevés dans CATIA 2026x).
 VIEW_GENERAL = "DS_Views::SymbolicViews::gv"
 VIEW_STATES = "DS_Views::SymbolicViews::stv"
@@ -379,8 +381,8 @@ def generate_catia(ex: Export, selected: list[str] | None = None, cfg: GenerateS
 
 
 def write_catia(files: list[CatiaFile], out_dir: Path) -> list[Path]:
-    """Écrit out_dir/catia/<UC>.sysml (et retire les anciens fichiers de ce dossier)."""
-    catia_dir = out_dir / "catia"
+    """Écrit out_dir/catia_community/<UC>.sysml (et retire les anciens fichiers de ce dossier)."""
+    catia_dir = out_dir / CATIA_DIR
     catia_dir.mkdir(parents=True, exist_ok=True)
     keep = {f.name for f in files}
     for old in catia_dir.glob("*.sysml"):

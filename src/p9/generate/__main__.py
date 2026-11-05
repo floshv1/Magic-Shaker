@@ -1,4 +1,4 @@
-"""`python -m p9.generate` : export → out/sysml/*.sysml + out/model.sysml + out/catia/*.sysml."""
+"""`python -m p9.generate` : export → out/sysml/*.sysml + out/model.sysml + out/catia_community/*.sysml."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import sys
 from p9.config import load_settings
 from p9.ingest import ExportUnreadable, load_path
 
-from . import generate, generate_catia, write, write_catia
+from . import CATIA_DIR, generate, generate_catia, write, write_catia
 
 
 def main(argv: list[str]) -> int:
@@ -45,7 +45,7 @@ def main(argv: list[str]) -> int:
     over = []
     for f in catia:
         flag = "" if f.chars <= s.catia.char_limit else "  DEPASSE LA LIMITE CATIA"
-        print(f"ecrit out/catia/{f.name} : {f.chars}/{s.catia.char_limit} caracteres, ~{f.declarations} "
+        print(f"ecrit out/{CATIA_DIR}/{f.name} : {f.chars}/{s.catia.char_limit} caracteres, ~{f.declarations} "
               f"declarations{flag}" + (f" (reductions : {', '.join(f.trims)})" if f.trims else ""))
         if flag:
             over.append(f.name)
