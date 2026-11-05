@@ -187,6 +187,19 @@ def test_fichier_de_decisions_illisible_jamais_ecrase(app, export, tmp_path) -> 
     assert any("Décision non enregistrée" in e.value and "illisible" in e.value for e in app.error)
 
 
+def test_proposition_llm_affichee_sans_image(app, export, tmp_path) -> None:
+    """Une image markdown dans un texte du LLM ferait charger une URL choisie par le modèle : elle est neutralisée."""
+    from p9.llm import Proposal, ProposalStore, save_store
+    step = next(s for s in export.steps if s.name == "Parking ratio")
+    p = Proposal(kind="guard", title="Vitesse sous 10 km/h", text="Voir ![x](http://example.invalid/p.png) ici.",
+                 rationale="trigger_text", target_ids=[step.step_id], proposal_id="abc123def456")
+    save_store(ProposalStore(proposals=[p]), tmp_path / "review" / "llm_proposals.json")
+    _open_review(app)
+    md = _md(app)
+    assert "Voir !\\[x](http://example.invalid/p.png) ici." in md     # liste des propositions + carte du point
+    assert "![x](" not in md
+
+
 def test_ecarter_exige_une_raison(app, export, tmp_path) -> None:
     from p9.review import load_review
     _open_review(app)

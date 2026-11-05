@@ -217,6 +217,12 @@ def html(text: str) -> None:
     st.markdown(text, unsafe_allow_html=True)
 
 
+def llm_md(text: str) -> str:
+    """Texte écrit par le LLM, affiché sans image : une image markdown ferait charger une URL choisie par le modèle
+    (fuite possible si un texte de l'export lui dictait des instructions). Le texte reste lisible tel quel."""
+    return str(text).replace("![", "!\\[")
+
+
 def badges(*texts: str) -> str:
     return "".join(f"<span class='badge'>{escape(t)}</span>" for t in texts)
 
@@ -769,8 +775,9 @@ def _review_card(item) -> None:
             with st.expander("Traiter ce point", expanded=d is not None):
                 for p in related:
                     q1, q2 = st.columns([4, 1.3], vertical_alignment="center")
-                    q1.markdown(f"<span class='muted'>Proposition du LLM ({escape(p.kind)}) : <b>{escape(p.title)}</b>"
-                                f" : {escape(p.text)}</span>", unsafe_allow_html=True)
+                    q1.markdown(f"<span class='muted'>Proposition du LLM ({escape(p.kind)}) : "
+                                f"<b>{escape(llm_md(p.title))}</b> : {escape(llm_md(p.text))}</span>",
+                                unsafe_allow_html=True)
                     q2.button("Reprendre et modifier", key=f"rv_use_{fid}_{p.proposal_id}", on_click=_use_proposal,
                               args=(fid, p, p.kind), width="stretch")
                 _review_form(item)
@@ -985,8 +992,8 @@ if step == 3:
                 for p in shown:
                     with st.container(border=True):
                         st.markdown(badges(p.kind, p.status, f"origin = {p.origin}"), unsafe_allow_html=True)
-                        st.markdown(f"**{p.title}**  \n{p.text}")
-                        html(f"<span class='muted'>{escape(p.rationale)}</span><br>"
+                        st.markdown(f"**{llm_md(p.title)}**  \n{llm_md(p.text)}")
+                        html(f"<span class='muted'>{escape(llm_md(p.rationale))}</span><br>"
                              f"<span class='ids'>cibles : {' · '.join(p.target_ids)} · id {p.proposal_id}</span>")
                         b1, b2, _ = st.columns([1, 1, 1.5])
                         b1.button("Accepter", key=f"acc_{p.proposal_id}", on_click=_decide,
@@ -1008,7 +1015,7 @@ if step == 3:
                     history = st.session_state.setdefault(hist_key, [])
                     for turn in history:
                         with st.chat_message(turn["role"]):
-                            st.markdown(turn["content"])
+                            st.markdown(llm_md(turn["content"]))
                             if turn.get("tools"):
                                 st.caption("Outils appelés : " + ", ".join(turn["tools"]))
                     question = st.chat_input("Ex. : quels besoins implicites ne sont couverts par aucun user need ?")
@@ -1025,7 +1032,7 @@ if step == 3:
                             except LlmUnavailable as e:
                                 st.error(str(e))
                                 st.stop()
-                            st.markdown(ans.text)
+                            st.markdown(llm_md(ans.text))
                             tools = [c["name"] for c in ans.tool_calls]
                             if tools:
                                 st.caption("Outils appelés : " + ", ".join(tools))
