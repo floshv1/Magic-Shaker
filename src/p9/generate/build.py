@@ -34,6 +34,7 @@ class CommonNames:
     state: dict[str, str] = field(default_factory=dict)            # state_id → state (dans le state def)
     requirement: dict[str, str] = field(default_factory=dict)      # user_need_id → requirement def
     event: dict[str, str] = field(default_factory=dict)            # state_id → item def (événement)
+    use_case: dict[str, str] = field(default_factory=dict)         # use_case_id → use case def
 
 
 def by_pos(rows, *keys: str):
@@ -62,6 +63,10 @@ def compute_common_names(ex: Export, cfg: GenerateSettings) -> CommonNames:
             st = state_by_id[t.state_id]
             comp = n.component_def.get(st.component_id, "Component")
             n.event[t.state_id] = namer.take(f"{comp}Is{pascal(st.name)}")
+    # use case def : nommés en dernier (les noms ci-dessus ne bougent pas), uniques face aux définitions
+    # communes, car le fichier CATIA d'un use case met tout dans un seul package
+    for uc in by_pos(ex.use_cases, "position", "use_case_id"):
+        n.use_case[uc.use_case_id] = namer.name(uc.name, upper=True)
     # parts des composants, une portée par parent (ESpace ou composant objet)
     scopes: dict[str | None, Namer] = defaultdict(Namer)
     known = {c.component_id for c in comps}
@@ -383,7 +388,7 @@ def use_case_package(uc: m.UseCase) -> str:
 def build_use_case(ex: Export, cfg: GenerateSettings, names: CommonNames, uc: m.UseCase) -> tuple[dict, list[TraceEntry]]:
     common = cfg.common_package
     pkg = use_case_package(uc)
-    ucdef = pascal(uc.name)
+    ucdef = names.use_case[uc.use_case_id]
     base_qn = f"{pkg}::{ucdef}"
     trace: list[TraceEntry] = []
     namer = Namer({cfg.subject_name, "start", "done"} | RESERVED)
