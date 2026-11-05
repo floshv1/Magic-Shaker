@@ -49,6 +49,18 @@ class LlmUnavailable(RuntimeError):
     """Fournisseur non configuré ou injoignable (clé absente, Ollama arrêté…)."""
 
 
+class _Transient(LlmUnavailable):
+    """Erreur serveur passagère (ex. « Internal Server Error » d'un modèle cloud Ollama) : on réessaie."""
+
+
+_TRANSIENT_MARKERS = ("internal server error", "server error", "overloaded", "unavailable", "timed out",
+                      "timeout", "try again", "502", "503", "504")
+
+
+def _is_transient(message: str) -> bool:
+    return any(m in message.lower() for m in _TRANSIENT_MARKERS)
+
+
 @dataclass
 class ToolCall:
     name: str
@@ -154,12 +166,25 @@ class OllamaProvider:
     """Ollama local (aucune donnée ne quitte la machine). API HTTP /api/chat avec outils."""
 
     name = "ollama"
+    RETRIES = 2              # nouveaux essais sur erreur serveur passagère (modèles cloud surtout)
 
     def __init__(self, cfg: LlmSettings) -> None:
         self.host = cfg.ollama_host.rstrip("/")
         self.model = cfg.ollama_model
 
     def _post(self, payload: dict[str, Any], on_event: OnEvent | None = None) -> dict[str, Any]:
+        """`_post_once`, réessayé après une erreur serveur passagère (1 s, puis 2 s)."""
+        for attempt in range(1, self.RETRIES + 2):
+            try:
+                return self._post_once(payload, on_event)
+            except _Transient as e:
+                if attempt > self.RETRIES:
+                    raise LlmUnavailable(f"{e} (apres {attempt} essais)") from e
+                _emit(on_event, "step", f"Erreur passagere d'Ollama ({e}), nouvel essai {attempt}/{self.RETRIES}")
+                time.sleep(attempt)
+        raise AssertionError("inatteignable")  # pragma: no cover
+
+    def _post_once(self, payload: dict[str, Any], on_event: OnEvent | None = None) -> dict[str, Any]:
         """POST /api/chat en streaming (NDJSON) ; renvoie un message agrégé comme en mode non streamé.
 
         Le streaming sert à suivre la génération : tokens de réflexion, puis tokens de réponse."""
@@ -179,7 +204,8 @@ class OllamaProvider:
                         continue
                     chunk = json.loads(raw.decode("utf-8"))
                     if chunk.get("error"):
-                        raise LlmUnavailable(f"Ollama : {chunk['error']}")
+                        err = str(chunk["error"])
+                        raise (_Transient if _is_transient(err) else LlmUnavailable)(f"Ollama : {err}")
                     msg = chunk.get("message") or {}
                     if msg.get("thinking"):
                         thinking.append(msg["thinking"])
@@ -205,7 +231,8 @@ class OllamaProvider:
                 message["thinking"] = "".join(thinking)
             return {"message": message, "done_reason": final.get("done_reason", "")}
         except urllib.error.HTTPError as e:
-            raise LlmUnavailable(f"Ollama : erreur {e.code} ({e.read().decode('utf-8', 'replace')[:200]})") from e
+            err = f"Ollama : erreur {e.code} ({e.read().decode('utf-8', 'replace')[:200]})"
+            raise (_Transient if e.code >= 500 or e.code == 429 else LlmUnavailable)(err) from e
         except (urllib.error.URLError, OSError) as e:
             raise LlmUnavailable(f"Ollama injoignable sur {self.host} (lancer `ollama serve`)") from e
 

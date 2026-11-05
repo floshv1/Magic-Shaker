@@ -37,6 +37,8 @@ data_dir = "data/usershaker"
 out_dir = "out"
 # Décisions humaines sur les points à valider : versionnées dans git (partagées par l'équipe).
 review_file = "review/decisions.json"
+# Questions de mesure de l'agent de chat (`make eval-llm`), avec leurs reponses attendues.
+llm_eval_file = "evals/llm_questions.json"
 
 # Noms des packages et du système générés (propres au projet, donc ici et pas dans le code).
 [tool.p9.generate]

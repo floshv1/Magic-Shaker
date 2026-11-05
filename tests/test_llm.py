@@ -136,3 +136,85 @@ def test_rendu_propositions_acceptees_separees(ctx) -> None:
     assert "LlmOrigin" not in g.single_file              # jamais mélangé au modèle d'origine
     assert "LlmOrigin" not in g.files["ESpaceCommon.sysml"]
     assert {e.kind for e in g.trace if e.kind == "llm_proposal"} == {"llm_proposal"}
+
+
+# ------------------------------------------------------------ outils ajoutés, relance, mesure
+
+def test_component_timeline(export, ctx) -> None:
+    wheel = next(c.component_id for c in export.components if c.name == "Steer-by-wire half wheel")
+    uc4 = next(u.use_case_id for u in export.use_cases if u.position == 4)
+    out, err = run_tool(ctx, "component_timeline", {"component_id": wheel, "use_case_id": uc4})
+    data = json.loads(out)
+    assert not err and [u["use_case_id"] for u in data["use_cases"]] == [uc4]
+    first = data["use_cases"][0]["steps"][0]
+    assert first["step"] == "Park at the charger" and first["event"] == "Gear selector is P"
+    assert [s["name"] for s in first["states"]] == ["Normal ratio"] and first["changed"] is False
+    every, _ = run_tool(ctx, "component_timeline", {"component_id": wheel, "use_case_id": ""})
+    assert len(json.loads(every)["use_cases"]) > 1
+    assert "introuvable" in run_tool(ctx, "component_timeline", {"component_id": "x", "use_case_id": ""})[0]
+
+
+def test_traceability_status_signale_la_troncature(ctx) -> None:
+    data = json.loads(run_tool(ctx, "traceability_status", {"status": "mapped"})[0])
+    assert data["total"] > data["shown"] == len(data["rows"]) and data["truncated"] is True
+
+
+def test_index_dans_le_prompt(export, ctx) -> None:
+    from p9.llm.agent import context_index
+    idx = context_index(ctx)
+    assert all(c.component_id in idx for c in export.components)
+    assert all(p.biography not in idx for p in export.personas if p.biography)
+
+
+def test_relance_sur_erreur_passagere(monkeypatch) -> None:
+    from p9.config import load_settings
+    from p9.llm import providers
+    prov = providers.OllamaProvider(load_settings().llm)
+    calls = []
+
+    def flaky(payload, on_event=None):
+        calls.append(1)
+        if len(calls) == 1:
+            raise providers._Transient("Ollama : Internal Server Error")
+        return {"message": {"role": "assistant", "content": "ok"}, "done_reason": "stop"}
+
+    monkeypatch.setattr(prov, "_post_once", flaky)
+    monkeypatch.setattr(providers.time, "sleep", lambda s: None)
+    assert prov._post({})["message"]["content"] == "ok" and len(calls) == 2
+
+    def down(payload, on_event=None):
+        raise providers._Transient("Ollama : Internal Server Error")
+
+    monkeypatch.setattr(prov, "_post_once", down)
+    with pytest.raises(providers.LlmUnavailable, match="3 essais"):
+        prov._post({})
+    assert not providers._is_transient("model 'x' not found")
+
+
+def test_score_d_une_reponse() -> None:
+    from p9.llm.agent import AgentAnswer
+    from p9.llm.evaluate import EvalQuestion, score_answer
+    q = EvalQuestion(id="q", question="?", must_cite=["aaaaaaaaaaaaaaaaaaaaaaaaa"],
+                     must_mention=[["ratio normal", "normal ratio"]], tools_any=["component_timeline"])
+    good = AgentAnswer(text="Le volant reste en Ratio normal (`aaaaaaaaaaaaaaaaaaaaaaaaa`).",
+                       tool_calls=[{"name": "component_timeline"}])
+    assert score_answer(q, good).passed
+    bad = AgentAnswer(text="The wheel is in Parking ratio.", tool_calls=[{"name": "find_element"}],
+                      unknown_ids=["zzz"])
+    res = score_answer(q, bad)
+    assert not res.passed and res.score == 0 and res.missing_ids == ["aaaaaaaaaaaaaaaaaaaaaaaaa"]
+    assert res.criteria["language"] == 0.0
+
+
+def test_questions_de_mesure_valides(export) -> None:
+    from p9.config import load_settings
+    from p9.llm.evaluate import load_questions
+    from p9.llm.tools import TOOLS_BY_NAME
+    questions = load_questions(load_settings().llm_eval_file)
+    ids = ({u.use_case_id for u in export.use_cases} | {s.step_id for s in export.steps}
+           | {p.persona_id for p in export.personas} | {c.component_id for c in export.components}
+           | {n.user_need_id for n in export.user_needs} | {f.feedback_id for f in export.persona_step_feedback})
+    assert len({q.id for q in questions}) == len(questions)
+    for q in questions:
+        assert set(q.must_cite) <= ids, q.id
+        assert set(q.tools_any) <= TOOLS_BY_NAME.keys(), q.id
