@@ -253,6 +253,34 @@ def test_relance_sur_erreur_passagere(monkeypatch) -> None:
     assert not providers._is_transient("model 'x' not found")
 
 
+@pytest.mark.parametrize("host, url", [
+    ("http://localhost:11434/", "http://localhost:11434"),
+    ("127.0.0.1:11434", "http://127.0.0.1:11434"),           # format du serveur Ollama, sans schéma
+    ("0.0.0.0", "http://127.0.0.1:11434"),                   # adresse d'écoute : on se connecte en local
+    ("https://ollama.example.org", "https://ollama.example.org"),
+])
+def test_adresse_ollama(host: str, url: str) -> None:
+    from p9.llm.providers import ollama_base_url
+    assert ollama_base_url(host) == url
+
+
+def test_ollama_muet_n_est_pas_injoignable(monkeypatch) -> None:
+    """Un délai dépassé (modèle trop lent) ne doit pas dire « lancer ollama serve », ni relancer 5 minutes."""
+    from p9.config import load_settings
+    from p9.llm import providers
+    prov = providers.OllamaProvider(load_settings().llm)
+    calls = []
+
+    def silent(req, timeout=None):
+        calls.append(timeout)
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(providers.urllib.request, "urlopen", silent)
+    with pytest.raises(providers.LlmUnavailable, match="n'a rien envoye pendant 300 s") as e:
+        prov._post({"model": "x", "messages": []})
+    assert "ollama serve" not in str(e.value) and calls == [300]
+
+
 def test_score_d_une_reponse() -> None:
     from p9.llm.agent import AgentAnswer
     from p9.llm.evaluate import EvalQuestion, score_answer
