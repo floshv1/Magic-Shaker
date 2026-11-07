@@ -1,0 +1,125 @@
+{% import "_macros.sysml.j2" as m %}
+package {{ package }} {
+{% if project.id %}
+{{ m.ref(project.id, "project", "    ") }}
+{% endif %}
+{{ m.doc(project.doc, "    ") }}
+    private import ScalarValues::*;
+
+    metadata def UserShakerRef {
+        doc /* Trace chaque element genere vers son id UserShaker. */
+        attribute id : String;
+        attribute kind : String;
+    }
+
+    attribute def PersonaFeedback {
+        doc /* Ce que vit un persona a un step (persona_step_feedback). */
+        attribute personaId : String;
+        attribute isPresent : Boolean;
+        attribute emotionScore : Integer;
+    }
+
+    // ------------------------------------------------------------------ personas
+    part def Persona {
+        attribute ageCategory : String;
+        attribute gender : String;
+    }
+{% for p in personas %}
+
+    part {{ p.name }} : Persona {
+{{ m.ref(p.id, "persona", "        ") }}
+{{ m.doc(p.doc, "        ") }}
+{% for k, v in p.attrs %}
+        :>> {{ k }} = {{ v | q }};
+{% endfor %}
+    }
+{% endfor %}
+
+    // ------------------------------------------------------------------ composants
+    abstract part def Component {
+        attribute role : String;
+        attribute category : String;
+    }
+{% for c in components %}
+
+    part def {{ c.name }} :> Component {
+{{ m.ref(c.id, "component", "        ") }}
+{{ m.doc(c.doc, "        ") }}
+{% for k, v in c.attrs %}
+        :>> {{ k }} = {{ v | q }};
+{% endfor %}
+{% for pn, pt in c.parts %}
+        part {{ pn }} : {{ pt }};
+{% endfor %}
+{% if c.state_def %}
+        exhibit state states : {{ c.state_def }};
+{% endif %}
+    }
+{% endfor %}
+
+    part def {{ system }} {
+{% if project.id %}
+{{ m.ref(project.id, "system", "        ") }}
+{% endif %}
+{% for pn, pt in system_parts %}
+        part {{ pn }} : {{ pt }};
+{% endfor %}
+    }
+{% if events %}
+
+    // ------------------------------------------------------------------ evenements (step_triggers kind=trigger)
+{% for e in events %}
+    item def {{ e.name }} {
+{{ m.ref(e.id, "trigger_event", "        ") }}
+{{ m.doc(e.doc, "        ") }}
+    }
+{% endfor %}
+{% endif %}
+{% if state_defs %}
+
+    // ------------------------------------------------------------------ etats et transitions
+    // Transitions deduites de la grille du blueprint (step_component_states) :
+    // accept = evenement du step, if = ses conditions. Regle a valider par l'expert UserShaker.
+{% for sd in state_defs %}
+
+    state def {{ sd.name }} {
+        entry; then {{ sd.initial }};
+{% for s in sd.states %}
+        state {{ s.name }} {
+{{ m.ref(s.id, "component_state", "            ") }}
+{{ m.doc(s.doc, "            ") }}
+        }
+{% endfor %}
+{% for g in sd.guards %}
+        attribute {{ g.name }} : Boolean {
+{{ m.ref(g.state_id, "condition", "            ") }}
+{{ m.doc(g.doc, "            ") }}
+        }
+{% endfor %}
+{% for t in sd.transitions %}
+        transition {{ t.name }}
+            first {{ t.source }}
+{% if t.accept %}
+            accept {{ t.accept }}
+{% endif %}
+{% if t.guards %}
+            if {{ t.guards | join(" and ") }}
+{% endif %}
+            then {{ t.target }} {
+{{ m.ref(t.ref_id, "transition", "                ") }}
+{{ m.doc(t.doc, "                ") }}
+            }
+{% endfor %}
+    }
+{% endfor %}
+{% endif %}
+
+    // ------------------------------------------------------------------ besoins (user_needs)
+{% for r in requirements %}
+
+    requirement def {{ r.name }} {
+{{ m.ref(r.id, "user_need", "        ") }}
+{{ m.doc(r.doc, "        ") }}
+    }
+{% endfor %}
+}

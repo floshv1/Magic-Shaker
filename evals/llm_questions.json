@@ -1,0 +1,95 @@
+{
+  "dataset": "Renault E-Space concept (export UserShaker du 2026-11-04)",
+  "about": "Questions de mesure de l'agent de chat (make eval-llm). Chaque entree de must_mention est une liste de variantes acceptees (accents et casse ignores).",
+  "questions": [
+    {
+      "id": "text_constraints",
+      "question": "Quelles contraintes ne sont ecrites que dans le texte libre, sans condition structuree ?",
+      "must_cite": ["c8c61483641fd1f6a915f7002", "ca3ca8969f3f3c09ce88d1281"],
+      "must_mention": [["10 km/h"], ["console"]],
+      "tools_any": ["constraints_in_text_only"],
+      "note": "Les deux pertes connues : UC3 'Parking ratio' (10 km/h) et UC2 'Lea starts a game' (console au centre)."
+    },
+    {
+      "id": "uncovered_needs",
+      "question": "Y a-t-il des user needs servis par aucun step ?",
+      "must_mention": [["aucun", "tous les", "tous servis", "tous couverts", "chaque besoin", "chaque user need", "none", "all user needs", "every user need", "no user need", "il n'y a pas", "n'y a aucun", "pas de user need", "liste est vide"]],
+      "tools_any": ["uncovered_needs"],
+      "note": "Les 10 besoins sont tous servis."
+    },
+    {
+      "id": "persona_conflict",
+      "question": "Y a-t-il des incoherences entre personas d'un use case a l'autre ?",
+      "must_cite": ["c141266c3c58944faf796e515", "c43e641888c06064b6600439d"],
+      "tools_any": ["persona_inconsistencies"],
+      "note": "Jacques passager avant dans UC2 alors que la biographie de Hugo lui donne ce role."
+    },
+    {
+      "id": "implicit_need_distance",
+      "question": "Quels insights negatifs pendant les manoeuvres de stationnement pourraient devenir de nouveaux besoins ?",
+      "must_cite": ["cb468f5cf09be9ad04a7e2bbb"],
+      "must_mention": [["distance"]],
+      "tools_any": ["implicit_needs", "search_elements"],
+      "note": "Camille, step 'Obstacle close' : 'Wants a clearer distance cue' (emotion -1)."
+    },
+    {
+      "id": "condition_vs_grid",
+      "question": "Y a-t-il un step dont une condition est contredite par l'etat des composants dans la grille du blueprint ?",
+      "must_cite": ["c53034a442cbba67483111b90"],
+      "must_mention": [["not connected", "non connecte", "debranche", "deconnecte"]],
+      "tools_any": ["conditions_vs_grid", "component_timeline"],
+      "note": "UC4 'Back to drive configuration' exige le cable 'Not connected', la grille dit 'Charge complete'."
+    },
+    {
+      "id": "trigger_conflict_gear_p",
+      "question": "Le passage du levier de vitesse en P provoque-t-il les memes reactions dans tous les use cases ?",
+      "must_cite": ["c1bdbbb641d939e8e264a1c66"],
+      "must_mention": [["stow", "rentre", "range", "escamot"], ["normal ratio", "ratio normal"]],
+      "tools_any": ["trigger_reaction_conflicts", "component_timeline"],
+      "note": "En P, le demi-volant se range dans UC3 ('Stowing') mais reste en 'Normal ratio' dans UC4."
+    },
+    {
+      "id": "wheel_state_uc4",
+      "question": "Dans le use case Lounge stop while charging, dans quel etat est le demi-volant steer-by-wire quand Camille passe le levier en P ?",
+      "must_cite": ["ccdd8e505c8dfb9b8a8ba7ab2"],
+      "must_mention": [["normal ratio", "ratio normal"]],
+      "tools_any": ["component_timeline"],
+      "note": "Step 1 'Park at the charger' : le demi-volant est en 'Normal ratio'."
+    },
+    {
+      "id": "doors_uc1",
+      "question": "Dans le use case Welcome on board, dans quel etat sont les portes au debut, et quel evenement les deverrouille ?",
+      "must_cite": ["cf89cc35b7d46329ff676c9a3"],
+      "must_mention": [["locked", "verrouill"], ["driver at the door", "1.5 m", "1,5 m", "a la porte", "pres de la porte", "proximite"]],
+      "tools_any": ["component_timeline", "use_case_steps"],
+      "note": "Portes 'Locked', puis step 'Unlock' declenche par 'Proximity & parking sensors is Driver at the door'."
+    },
+    {
+      "id": "personas_uc1",
+      "question": "Quels personas participent au use case Welcome on board ?",
+      "must_cite": ["c141266c3c58944faf796e515", "ca900b535b5e949b19c8504f9"],
+      "tools_any": ["list_use_cases", "find_element", "search_elements", "use_case_steps"],
+      "note": "Jacques et Camille."
+    },
+    {
+      "id": "needs_unlock",
+      "question": "Quels user needs sert le step Unlock du use case Welcome on board ?",
+      "must_cite": ["ce8af1b6c87f03ac42bf96325", "cf14ff21a1930d7698912316a"],
+      "tools_any": ["use_case_steps", "find_element"],
+      "note": "'Board easily with family and luggage' et 'Feel recognised and welcomed by my car'."
+    },
+    {
+      "id": "partial_trace",
+      "question": "Quels elements de l'export ne sont que partiellement traduits dans le modele SysML, et pourquoi ?",
+      "must_mention": [["partiel", "partial"]],
+      "tools_any": ["traceability_status"],
+      "note": "La matrice de tracabilite a des lignes 'partial' avec leur raison."
+    },
+    {
+      "id": "unknown_fact",
+      "question": "Quelle est l'autonomie de la batterie de l'E-Space, en kilometres ?",
+      "must_mention": [["ne permet pas", "aucune information", "pas d'information", "ne contient pas", "pas disponible", "introuvable", "aucune donnee", "pas de donnee", "ne figure pas", "n'est pas indique", "n'est pas renseigne", "pas mentionne", "ne mentionne", "aucune mention", "il n'existe aucun", "aucun element", "n'existe pas", "no information", "not found", "no data", "does not contain", "not available", "no mention", "no step contains", "not provided", "contains no", "cannot provide", "is not present", "no autonomy", "no range"]],
+      "note": "Absent de l'export : l'agent doit le dire au lieu d'inventer un chiffre (variantes anglaises acceptees : le critere porte sur l'absence d'invention, la langue est verifiee a part)."
+    }
+  ]
+}

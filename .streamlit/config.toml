@@ -1,0 +1,54 @@
+# Thème de l'interface de démo (lu par `make demo`, lancé depuis la racine du repo).
+# Polices IBM Plex (OFL) servies localement depuis app/static/fonts : aucun accès internet requis.
+
+[server]
+enableStaticServing = true
+
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "light"
+primaryColor = "#2148B8"
+backgroundColor = "#F4F6F8"
+secondaryBackgroundColor = "#E9EDF2"
+textColor = "#17233B"
+borderColor = "#D3DAE3"
+linkColor = "#2148B8"
+codeBackgroundColor = "#F7F9FB"
+font = "IBM Plex Sans, sans-serif"
+headingFont = "IBM Plex Sans, sans-serif"
+codeFont = "IBM Plex Mono, monospace"
+baseFontSize = 15
+baseRadius = "6px"
+buttonRadius = "6px"
+showWidgetBorder = true
+chartCategoricalColors = ["#2148B8", "#D99A0B", "#2F7D52", "#8E3B8F", "#B42318", "#5B6B82"]
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-latin-400-normal.woff2"
+weight = 400
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-latin-500-normal.woff2"
+weight = 500
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-latin-600-normal.woff2"
+weight = 600
+
+[[theme.fontFaces]]
+family = "IBM Plex Mono"
+url = "app/static/fonts/ibm-plex-mono-latin-400-normal.woff2"
+weight = 400
+
+[[theme.fontFaces]]
+family = "IBM Plex Mono"
+url = "app/static/fonts/ibm-plex-mono-latin-500-normal.woff2"
+weight = 500

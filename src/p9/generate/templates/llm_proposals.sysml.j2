@@ -1,0 +1,36 @@
+{% import "_macros.sysml.j2" as m %}
+{% macro origin(p, ind) -%}
+{{ ind }}@LlmOrigin { origin = {{ p.origin | q }}; status = "accepted"; proposalId = {{ p.id | q }}; basedOn = {{ p.based_on | q }}; }
+{%- endmacro %}
+package {{ package }} {
+    doc /* Propositions deduites par un LLM puis acceptees par un humain. Contenu separe du modele
+     * d'origine UserShaker : chaque element porte LlmOrigin (origin = "llm"). */
+    private import ScalarValues::*;
+    private import {{ common }}::*;
+{% for i in imports %}
+    private import {{ i }}::*;
+{% endfor %}
+
+    metadata def LlmOrigin {
+        attribute origin : String;
+        attribute status : String;
+        attribute proposalId : String;
+        attribute basedOn : String;
+    }
+{% for p in items %}
+
+{% if p.kind == "guard" %}
+    constraint def {{ p.name }} {
+{% else %}
+    requirement def {{ p.name }}{% if p.refines %} :> {{ p.refines }}{% endif %} {
+{% endif %}
+{{ origin(p, "        ") }}
+{{ m.doc(p.doc, "        ") }}
+    }
+{% for d in p.dependencies %}
+    dependency from {{ d }} to {{ p.name }} {
+{{ origin(p, "        ") }}
+    }
+{% endfor %}
+{% endfor %}
+}

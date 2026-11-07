@@ -1,0 +1,96 @@
+"""Tests qui lancent le vrai parseur OMG (lents) : `make test-omg`."""
+
+from __future__ import annotations
+
+import pytest
+
+from p9.checks.sysml_parser import is_installed, order_by_imports, validate_texts
+from p9.generate import generate
+
+pytestmark = pytest.mark.omg
+
+
+def test_ordre_des_imports() -> None:
+    texts = {
+        "a.sysml": "package UC1 {\n    private import Common::*;\n}\n",
+        "b.sysml": "package Common {\n    private import ScalarValues::*;\n}\n",
+    }
+    assert order_by_imports(texts) == ["b.sysml", "a.sysml"]
+
+
+@pytest.mark.skipif(not is_installed(), reason="parseur OMG absent (make validate-setup)")
+def test_fichiers_generes_passent_le_parseur(export, tmp_path) -> None:
+    gen = generate(export)
+    seen: list[tuple[str, str]] = []
+    res = validate_texts(gen.files, tmp_path / "split", on_event=lambda k, t: seen.append((k, t)))
+    assert res.ok, [i.model_dump() for i in res.issues][:10]
+    assert len(res.files) == 5
+    texts = [t for _, t in seen]                    # avancement lu en direct
+    assert any(t.startswith("Chargement de la bibliotheque") for t in texts)
+    assert sum(1 for k, _ in seen if k == "file") == 5
+
+
+@pytest.mark.skipif(not is_installed(), reason="parseur OMG absent (make validate-setup)")
+def test_fichier_unique_et_propositions_llm_passent_le_parseur(export, tmp_path) -> None:
+    from p9.llm import Proposal
+    step = next(s for s in export.steps if s.name == "Parking ratio")
+    fb = next(f for f in export.persona_step_feedback if f.insight == "Wants a clearer distance cue.")
+    need = export.user_needs[0]
+    accepted = [
+        Proposal(kind="guard", title="Vitesse sous 10 km/h", text="Rapport parking actif sous 10 km/h.",
+                 rationale="trigger_text", target_ids=[step.step_id], proposal_id="aaaaaaaaaaaa", status="accepted"),
+        Proposal(kind="requirement", title="Indication de distance claire", text="Le vehicule doit afficher "
+                 "la distance restante.", rationale="insight -1", target_ids=[fb.feedback_id, fb.step_id],
+                 proposal_id="bbbbbbbbbbbb", status="accepted"),
+        Proposal(kind="rephrase", title="Besoin reformule", text="Reformulation.", rationale="plus verifiable",
+                 target_ids=[need.user_need_id], proposal_id="cccccccccccc", status="accepted"),
+    ]
+    gen = generate(export, accepted_proposals=accepted)
+    res = validate_texts(gen.files, tmp_path / "with-llm")
+    assert res.ok, [i.model_dump() for i in res.issues][:10]
+    assert len(res.files) == 6
+    single = validate_texts({"model.sysml": gen.single_file}, tmp_path / "single")
+    assert single.ok, [i.model_dump() for i in single.issues][:10]
+
+
+@pytest.mark.skipif(not is_installed(), reason="parseur OMG absent (make validate-setup)")
+def test_fichiers_catia_passent_le_parseur(export, tmp_path) -> None:
+    from p9.checks.sysml_parser import catia_prelude
+    from p9.generate import generate_catia
+    files = {f.name: f.text for f in generate_catia(export)}
+    res = validate_texts(files, tmp_path / "catia", prelude=[catia_prelude()])
+    assert res.ok, [i.model_dump() for i in res.issues][:10]
+    assert len(res.files) == 1 + len(files)
+
+
+@pytest.mark.skipif(not is_installed(), reason="parseur OMG absent (make validate-setup)")
+def test_erreur_detectee(tmp_path) -> None:
+    res = validate_texts({"bad.sysml": "package Bad { part x : Inconnu; }\n"}, tmp_path / "bad")
+    assert not res.ok
+    assert any("Inconnu" in i.message for i in res.issues)
+
+
+@pytest.mark.skipif(not is_installed(), reason="parseur OMG absent (make validate-setup)")
+def test_decisions_humaines_passent_le_parseur(export, tmp_path) -> None:
+    from p9.checks import finding_id, run_all
+    from p9.review import Decision
+    f = run_all(export)
+    speed = next(x for x in f["constraints_in_text_only"] if "10 km/h" in x.message)
+    console = next(x for x in f["constraints_in_text_only"] if "console" in x.message)
+    comp = next(c for c in export.components if any(s.component_id == c.component_id for s in export.component_states))
+    state = next(s for s in export.component_states if s.component_id == comp.component_id)
+    ins, other = f["implicit_needs"][:2]
+
+    def dec(x, action, **kw):
+        return Decision(finding_id=finding_id(x), check=x.check, action=action, author="Testeur",
+                        decided_at="2026-11-04", target_ids=list(x.ids), **kw)
+
+    decisions = [dec(speed, "guard", title="Vitesse sous 10 km/h", text="vitesse < 10 km/h"),
+                 dec(console, "guard", title="Console au centre", component_id=comp.component_id,
+                     state_id=state.state_id),
+                 dec(ins, "requirement", title="Indication de distance", text="Le vehicule doit indiquer la distance."),
+                 dec(other, "link_need", need_id=export.user_needs[0].user_need_id)]
+    gen = generate(export, review_decisions=decisions)
+    assert "ESpaceConceptReview.sysml" in gen.files
+    res = validate_texts(gen.files, tmp_path / "review")
+    assert res.ok, [i.model_dump() for i in res.issues][:10]

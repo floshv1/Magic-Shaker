@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: "IBM Plex Sans"; src: url("/app/static/fonts/ibm-plex-sans-latin-400-normal.woff2") format("woff2"); font-weight: 400; }
+  @font-face { font-family: "IBM Plex Sans"; src: url("/app/static/fonts/ibm-plex-sans-latin-600-normal.woff2") format("woff2"); font-weight: 600; }
+  :root { --line: #D3DAE3; --ink: #17233B; --soft: #F4F6F8; --accent: #2148B8; }
+  html, body { margin: 0; height: 100%; font-family: "IBM Plex Sans", Helvetica, Arial, sans-serif; color: var(--ink); }
+  .frame { display: flex; flex-direction: column; height: 100%; border: 1px solid var(--line); border-radius: 6px;
+           overflow: hidden; background: #fff; box-sizing: border-box; }
+  .bar { display: flex; align-items: center; gap: 4px; padding: 6px 8px; background: var(--soft);
+         border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .bar .title { font-weight: 600; font-size: 13px; margin-right: auto; white-space: nowrap; overflow: hidden;
+                text-overflow: ellipsis; max-width: 45%; }
+  .bar button { font: inherit; font-size: 12px; padding: 3px 9px; border: 1px solid var(--line); background: #fff;
+                border-radius: 4px; cursor: pointer; color: var(--ink); }
+  .bar button:hover { border-color: var(--accent); color: var(--accent); }
+  .bar .zoom { font-size: 12px; min-width: 44px; text-align: center; color: #555; }
+  .bar .sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+  .view { position: relative; flex: 1; overflow: hidden; cursor: grab; background:
+          linear-gradient(#fff, #fff), repeating-linear-gradient(0deg, #f2f2f2 0 1px, transparent 1px 24px); }
+  .view.drag { cursor: grabbing; }
+  .view svg { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  .hint { position: absolute; right: 8px; bottom: 6px; font-size: 11px; color: #888; background: rgba(255,255,255,.85);
+          padding: 1px 6px; border-radius: 3px; pointer-events: none; }
+  .err { padding: 16px; color: #a8432f; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="bar">
+    <span class="title" id="title"></span>
+    <button data-act="out" title="Dézoomer">−</button>
+    <span class="zoom" id="zoom">100 %</span>
+    <button data-act="in" title="Zoomer">+</button>
+    <button data-act="fit" title="Tout afficher">Ajuster</button>
+    <button data-act="one" title="Taille réelle">100 %</button>
+    <span class="sep"></span>
+    <button data-act="full" title="Plein écran (Échap pour sortir)">⛶ Plein écran</button>
+    <button data-act="tab" title="Ouvrir dans un nouvel onglet">↗ Nouvel onglet</button>
+    <button data-act="svg" title="Télécharger l'image SVG">⭳ SVG</button>
+  </div>
+  <div class="view" id="view"><span class="hint">molette : zoom · glisser : déplacer · double-clic : ajuster</span></div>
+</div>
+<script id="vizlib">__VIZ_JS__</script>
+<script id="panzoom">
+function p9PanZoom(view, svg, zoomLabel) {
+  const w = svg.width.baseVal.value, h = svg.height.baseVal.value;
+  let k = 1, x = 0, y = 0;
+  const apply = () => {
+    svg.style.transform = `translate(${x}px, ${y}px) scale(${k})`;
+    if (zoomLabel) zoomLabel.textContent = Math.round(k * 100) + " %";
+  };
+  const zoomAt = (f, cx, cy) => {
+    const nk = Math.min(8, Math.max(0.05, k * f));
+    x = cx - (cx - x) * (nk / k); y = cy - (cy - y) * (nk / k); k = nk; apply();
+  };
+  const fit = () => {
+    const cw = view.clientWidth, ch = view.clientHeight;
+    k = Math.min((cw - 24) / w, (ch - 24) / h, 1.25);
+    x = (cw - w * k) / 2; y = (ch - h * k) / 2; apply();
+  };
+  const one = () => { k = 1; x = Math.max(12, (view.clientWidth - w) / 2); y = 12; apply(); };
+  view.addEventListener("wheel", e => {
+    e.preventDefault();
+    const r = view.getBoundingClientRect();
+    zoomAt(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX - r.left, e.clientY - r.top);
+  }, { passive: false });
+  let drag = null;
+  view.addEventListener("pointerdown", e => { drag = [e.clientX - x, e.clientY - y]; view.classList.add("drag");
+                                               view.setPointerCapture(e.pointerId); });
+  view.addEventListener("pointermove", e => { if (drag) { x = e.clientX - drag[0]; y = e.clientY - drag[1]; apply(); } });
+  view.addEventListener("pointerup", () => { drag = null; view.classList.remove("drag"); });
+  view.addEventListener("dblclick", fit);
+  window.addEventListener("resize", fit);
+  document.addEventListener("fullscreenchange", () => setTimeout(fit, 50));
+  const center = () => [view.clientWidth / 2, view.clientHeight / 2];
+  return { fit, one, zoomIn: () => zoomAt(1.25, ...center()), zoomOut: () => zoomAt(1 / 1.25, ...center()) };
+}
+</script>
+<script>
+const DOT = __DOT_JSON__;
+const TITLE = __TITLE_JSON__;
+document.getElementById("title").textContent = TITLE;
+const view = document.getElementById("view");
+Viz.instance().then(viz => {
+  const svg = viz.renderSVGElement(DOT);
+  view.prepend(svg);
+  const pz = p9PanZoom(view, svg, document.getElementById("zoom"));
+  pz.fit();
+  const svgText = () => new XMLSerializer().serializeToString(svg.cloneNode(true)).replace(/ style="[^"]*transform[^"]*"/, "");
+  const actions = {
+    in: pz.zoomIn, out: pz.zoomOut, fit: pz.fit, one: pz.one,
+    full: () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen(),
+    svg: () => {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([svgText()], { type: "image/svg+xml" }));
+      a.download = (TITLE.split(" ")[0] || "diagramme").replace(/[^\w-]/g, "_") + ".svg";
+      a.click();
+    },
+    tab: () => {
+      const page = `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>${TITLE.replace(/</g, "&lt;")}</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#fff;font-family:Helvetica,Arial,sans-serif}
+#view{position:absolute;inset:0;cursor:grab}#view svg{position:absolute;left:0;top:0;transform-origin:0 0}
+.hint{position:fixed;left:10px;top:8px;font-size:12px;color:#555;background:rgba(255,255,255,.9);padding:3px 8px;border:1px solid #ddd;border-radius:4px}</style>
+</head><body><div id="view">${svgText()}</div><div class="hint">${TITLE.replace(/</g, "&lt;")} · molette : zoom · glisser : déplacer · double-clic : ajuster</div>
+<scr` + `ipt>${document.getElementById("panzoom").textContent}
+const v=document.getElementById("view");p9PanZoom(v,v.querySelector("svg"),null).fit();</scr` + `ipt></body></html>`;
+      const win = window.open(URL.createObjectURL(new Blob([page], { type: "text/html" })), "_blank");
+      if (!win) alert("Le navigateur a bloqué l'ouverture : autorisez les fenêtres pop-up pour localhost.");
+    },
+  };
+  document.querySelectorAll(".bar button").forEach(b => b.addEventListener("click", () => actions[b.dataset.act]()));
+}).catch(err => {
+  view.innerHTML = `<div class="err">Rendu du diagramme impossible : ${String(err).replace(/</g, "&lt;")}</div>`;
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+[project]
+name = "p9"
+version = "0.1.0"
+description = "Projet 9 : traducteur UserShaker (UX) -> SysML v2 -> CATIA Magic"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.2",
+    "pydantic>=2.7",
+    "networkx>=3.3",
+    "jinja2>=3.1",
+    "streamlit>=1.40",
+    "anthropic>=2.4.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/p9"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q -m 'not omg'"
+markers = ["omg: lance le parseur OMG SysML v2 (lent ; `make test-omg`)"]
+
+# Configuration du pipeline (surchargeable par variables d'environnement
+# P9_DATA_DIR / P9_OUT_DIR, ou dans .env). Chemins relatifs à la racine du repo.
+[tool.p9]
+data_dir = "data/usershaker"
+out_dir = "out"
+# Décisions humaines sur les points à valider : versionnées dans git (partagées par l'équipe).
+review_file = "review/decisions.json"
+# Propositions du LLM et leur statut (accepted / rejected) : versionnées elles aussi. Lu en repli tant que ce
+# fichier n'existe pas : l'ancien out/proposals.json.
+proposals_file = "review/llm_proposals.json"
+# Questions de mesure de l'agent de chat (`make eval-llm`), avec leurs reponses attendues.
+llm_eval_file = "evals/llm_questions.json"
+
+# Noms des packages et du système générés (propres au projet, donc ici et pas dans le code).
+[tool.p9.generate]
+project_package = "ESpaceConcept"
+common_package = "ESpaceCommon"
+system_name = "ESpace"
+subject_name = "vehicle"
+
+# Sortie CATIA Community (out/catia_community/) : limites constatees de l'edition gratuite 2026x.
+[tool.p9.catia]
+char_limit = 20000     # l'editeur textuel refuse au-dela (par espace de noms racine)
+char_budget = 19000    # cible du generateur : marge pour les vues ajoutees a la main et le reformatage CATIA
+
+# LLM (enrichissement + chat). Surchargeable : P9_LLM_PROVIDER, P9_LLM_MODEL, P9_LLM_EFFORT,
+# OLLAMA_HOST, P9_OLLAMA_MODEL. La cle ANTHROPIC_API_KEY va dans .env (jamais commitee).
+[tool.p9.llm]
+provider = "anthropic"          # anthropic | ollama
+anthropic_model = "claude-opus-5-5"
+effort = "medium"
+ollama_host = "http://localhost:11434"
+ollama_model = "qwen2.5:7b"
+
+# Parseur OMG SysML v2 (Pilot Implementation) utilisé par `make validate`.
+# sysml_home : dossier de travail SANS ESPACE (le parseur ne gère pas les espaces sous Windows).
+[tool.p9.omg]
+kernel_version = "0.63.1"
+kernel_url = "https://github.com/Systems-Modeling/SysML-v2-Pilot-Implementation/releases/download/2026-09.1/jupyter-sysml-kernel-0.63.1.zip"
+jdk_url_template = "https://api.adoptium.net/v3/binary/latest/21/ga/{os}/{arch}/jdk/hotspot/normal/eclipse"
+sysml_home = "~/.cache/p9-sysml"
